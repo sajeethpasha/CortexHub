@@ -2,3 +2,6 @@ PySide6>=6.6.0
 openai>=1.40.0
 anthropic>=0.34.0
 python-dotenv>=1.0.0
+pyaudiowpatch>=0.2.12
+vosk>=0.3.45
+numpy>=1.24.0
