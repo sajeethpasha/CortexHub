@@ -632,22 +632,14 @@ class ResponsePanel(QWidget):
 
     # ---------------------------------------------------------- Ctrl+scroll zoom
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
-        if (
-            obj in (
-                self._zoom_group,
-                self._zoom_out_btn,
-                self._zoom_percent_btn,
-                self._zoom_in_btn,
-                self._zoom_slider,
-            )
-            and event.type() == QEvent.Type.Wheel
-        ):
-            if event.angleDelta().y() > 0:
-                self._zoom_in()
-            else:
-                self._zoom_out()
-            return True
-        if obj is self._view:
+        """Handle Ctrl+Wheel zoom on the response view and a popup mic hotkey.
+
+        This guards access to `self._view` in case the filter is invoked
+        during construction before the attribute exists.
+        """
+        view = getattr(self, "_view", None)
+        if view is not None and obj is view:
+            # Ctrl+Wheel → zoom in/out
             if event.type() == QEvent.Type.Wheel:
                 if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
                     if event.angleDelta().y() > 0:
@@ -655,15 +647,21 @@ class ResponsePanel(QWidget):
                     else:
                         self._zoom_out()
                     return True
+
+            # Ctrl+M → toggle selection popup mic when popup visible
             if event.type() == QEvent.Type.KeyPress:
                 if (
                     event.key() == Qt.Key.Key_M
                     and event.modifiers() & Qt.KeyboardModifier.ControlModifier
                 ):
-                    # Forward Ctrl+M to the selection popup mic (if popup is visible)
                     if self._selection_popup and self._selection_popup.isVisible():
-                        self._selection_popup._toggle_mic()
+                        # Use the popup's public toggle if available
+                        try:
+                            self._selection_popup._toggle_mic()
+                        except Exception:
+                            pass
                         return True
+
         return super().eventFilter(obj, event)
 
     # ------------------------------------------------------------ README export
