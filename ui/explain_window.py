@@ -5,7 +5,7 @@ import asyncio
 import html as _html_lib
 
 from PySide6.QtCore import QEvent, QThread, Qt, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QKeySequence, QShortcut
 from workers.voice_input_worker import VoiceInputWorker
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -166,10 +166,15 @@ class ExplainWindow(QWidget):
             "Follow-up question… press Enter or click Ask →"
         )
         self._query_input.returnPressed.connect(self._on_ask_clicked)
-        self._query_mic_btn = QPushButton("\U0001f3a4")
+        self._query_mic_btn = QPushButton("\U0001f3a4\\")
         self._query_mic_btn.setObjectName("PanelToolButton")
-        self._query_mic_btn.setToolTip("Voice input into query box")
-        self._query_mic_btn.setFixedSize(30, 26)
+        self._query_mic_btn.setToolTip("Voice input into query box  (Ctrl+M)")
+        self._query_mic_btn.setFixedSize(38, 26)
+        self._query_mic_btn.setStyleSheet(
+            "QPushButton{background:#2a0d0d;color:#e05252;"
+            "border:1.5px solid #e05252;border-radius:4px;font-size:13px;}"
+            "QPushButton:hover{background:#380f0f;}"
+        )
         self._query_mic_btn.clicked.connect(self._toggle_query_mic)
         ask_btn = QPushButton("Ask \u2192")
         ask_btn.setObjectName("TopBarButton")
@@ -186,6 +191,8 @@ class ExplainWindow(QWidget):
         self._query_voice_worker = VoiceInputWorker(self)
         self._query_voice_worker.text_ready.connect(self._on_query_voice_text)
         self._query_voice_worker.partial_text.connect(self._on_query_voice_partial)
+        self._query_voice_worker.status_changed.connect(self._on_query_voice_status)
+        QShortcut(QKeySequence("Ctrl+M"), self, activated=self._toggle_query_mic)
 
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
@@ -229,17 +236,23 @@ class ExplainWindow(QWidget):
         if self._query_voice_active:
             self._query_voice_worker.stop_voice()
             self._query_voice_active = False
-            self._query_mic_btn.setStyleSheet("")
+            self._query_mic_btn.setText("\U0001f3a4\\")
+            self._query_mic_btn.setStyleSheet(
+                "QPushButton{background:#2a0d0d;color:#e05252;"
+                "border:1.5px solid #e05252;border-radius:4px;font-size:13px;}"
+                "QPushButton:hover{background:#380f0f;}"
+            )
         else:
             self._query_voice_base = self._query_input.text()
             if self._query_voice_base and not self._query_voice_base.endswith(" "):
                 self._query_voice_base += " "
             self._query_voice_worker.start_voice()
             self._query_voice_active = True
+            self._query_mic_btn.setText("\U0001f3a4")
             self._query_mic_btn.setStyleSheet(
-                "QPushButton{background:#1a3a1a;color:#4ecb71;"
-                "border:2px solid #4ecb71;border-radius:5px;}"
-                "QPushButton:hover{background:#204a20;}"
+                "QPushButton{background:#0d2240;color:#1f9cf0;"
+                "border:1.5px solid #1f9cf0;border-radius:4px;font-size:13px;}"
+                "QPushButton:hover{background:#0e2e55;}"
             )
 
     def _on_query_voice_text(self, text: str) -> None:
@@ -248,6 +261,17 @@ class ExplainWindow(QWidget):
 
     def _on_query_voice_partial(self, text: str) -> None:
         self._query_input.setText((self._query_voice_base + text).rstrip())
+
+    def _on_query_voice_status(self, status: str) -> None:
+        """Reset mic button to OFF state on voice worker error."""
+        if status.startswith("Error"):
+            self._query_voice_active = False
+            self._query_mic_btn.setText("\U0001f3a4\\")
+            self._query_mic_btn.setStyleSheet(
+                "QPushButton{background:#2a0d0d;color:#e05252;"
+                "border:1.5px solid #e05252;border-radius:4px;font-size:13px;}"
+                "QPushButton:hover{background:#380f0f;}"
+            )
 
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
         if obj is self._view and event.type() == QEvent.Type.Wheel:

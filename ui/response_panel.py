@@ -205,11 +205,16 @@ class _SelectionPopup(QWidget):
         self._input.setMinimumWidth(170)
         self._input.returnPressed.connect(self._on_ask)
 
-        self._mic_btn = QPushButton("\U0001f3a4")
+        self._mic_btn = QPushButton("🎤\\")
         self._mic_btn.setObjectName("SelectionPopupButton")
-        self._mic_btn.setFixedSize(26, 26)
+        self._mic_btn.setFixedSize(36, 26)
         self._mic_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._mic_btn.setToolTip("Voice input into the ask box")
+        self._mic_btn.setStyleSheet(
+            "QPushButton{background:#2a0d0d;color:#e05252;"
+            "border:1.5px solid #e05252;border-radius:3px;}"
+            "QPushButton:hover{background:#380f0f;}"
+        )
         self._mic_btn.clicked.connect(self._toggle_mic)
 
         ask_btn = QPushButton("Ask \u2192")
@@ -235,17 +240,35 @@ class _SelectionPopup(QWidget):
         if self._voice_active:
             self._voice_worker.stop_voice()
             self._voice_active = False
-            self._mic_btn.setStyleSheet("")
+            self._mic_btn.setText("🎤\\")
+            self._mic_btn.setStyleSheet(
+                "QPushButton{background:#2a0d0d;color:#e05252;"
+                "border:1.5px solid #e05252;border-radius:3px;}"
+                "QPushButton:hover{background:#380f0f;}"
+            )
         else:
             self._voice_base_text = self._input.text()
             if self._voice_base_text and not self._voice_base_text.endswith(" "):
                 self._voice_base_text += " "
             self._voice_worker.start_voice()
             self._voice_active = True
+            self._mic_btn.setText("🎤")
             self._mic_btn.setStyleSheet(
-                "background:#1a3a1a;color:#4ecb71;"
-                "border:2px solid #4ecb71;border-radius:3px;"
+                "QPushButton{background:#0d2240;color:#1f9cf0;"
+                "border:1.5px solid #1f9cf0;border-radius:3px;}"
+                "QPushButton:hover{background:#0e2e55;}"
             )
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        """Handle Ctrl+M to toggle mic when popup has keyboard focus."""
+        if (
+            event.key() == Qt.Key.Key_M
+            and event.modifiers() & Qt.KeyboardModifier.ControlModifier
+        ):
+            self._toggle_mic()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
 
     def _on_voice_text(self, text: str) -> None:
         self._voice_base_text += text
@@ -259,7 +282,12 @@ class _SelectionPopup(QWidget):
         if self._voice_active:
             self._voice_worker.stop_voice()
             self._voice_active = False
-            self._mic_btn.setStyleSheet("")
+            self._mic_btn.setText("🎤\\")
+            self._mic_btn.setStyleSheet(
+                "QPushButton{background:#2a0d0d;color:#e05252;"
+                "border:1.5px solid #e05252;border-radius:3px;}"
+                "QPushButton:hover{background:#380f0f;}"
+            )
             self._voice_base_text = ""
 
     def _on_ask(self) -> None:
@@ -557,13 +585,23 @@ class ResponsePanel(QWidget):
 
     # ---------------------------------------------------------- Ctrl+scroll zoom
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
-        if obj is self._view and event.type() == QEvent.Type.Wheel:
-            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-                if event.angleDelta().y() > 0:
-                    self._zoom_in()
-                else:
-                    self._zoom_out()
-                return True
+        if obj is self._view:
+            if event.type() == QEvent.Type.Wheel:
+                if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                    if event.angleDelta().y() > 0:
+                        self._zoom_in()
+                    else:
+                        self._zoom_out()
+                    return True
+            if event.type() == QEvent.Type.KeyPress:
+                if (
+                    event.key() == Qt.Key.Key_M
+                    and event.modifiers() & Qt.KeyboardModifier.ControlModifier
+                ):
+                    # Forward Ctrl+M to the selection popup mic (if popup is visible)
+                    if self._selection_popup and self._selection_popup.isVisible():
+                        self._selection_popup._toggle_mic()
+                        return True
         return super().eventFilter(obj, event)
 
     # ------------------------------------------------------------ README export

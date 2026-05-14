@@ -289,6 +289,61 @@ QTabWidget#ConfigTabs QTabBar::tab:selected {
     border-bottom: 2px solid #1f6feb;
 }
 
+/* ── Config Shortcuts Panel ──────────────────────────────────── */
+QWidget#ConfigShortcutsPanel {
+    background-color: #0a0c10;
+    border-right: 1px solid #1a1f2a;
+}
+QLabel#ConfigShortcutsPanelHeader {
+    font-size: 12px;
+    font-weight: 700;
+    color: #4a6a9a;
+    letter-spacing: 2px;
+    padding: 2px 0 8px 0;
+}
+QFrame#ConfigShortcutDivider { color: #1a1f2a; }
+QLabel#ConfigShortcutKey {
+    font-size: 11px;
+    font-weight: 700;
+    color: #1f9cf0;
+    background-color: #0d1828;
+    border: 1px solid #1e3050;
+    border-radius: 4px;
+    padding: 2px 6px;
+}
+QLabel#ConfigShortcutDesc {
+    font-size: 11px;
+    color: #6a7a94;
+    padding: 1px 2px 0 2px;
+}
+
+/* ── Config Checkboxes ────────────────────────────────────────── */
+QWidget#ConfigChecksContainer {
+    background-color: #0d1018;
+    border: 1.5px solid #273045;
+    border-radius: 6px;
+}
+QCheckBox#ConfigCheckBox {
+    color: #c0c8d8;
+    font-size: 12px;
+    spacing: 6px;
+}
+QCheckBox#ConfigCheckBox::indicator {
+    width: 14px;
+    height: 14px;
+    border: 1.5px solid #3a4a6a;
+    border-radius: 3px;
+    background-color: #0d1018;
+}
+QCheckBox#ConfigCheckBox::indicator:checked {
+    background-color: #1f6feb;
+    border-color: #1f6feb;
+    image: none;
+}
+QCheckBox#ConfigCheckBox::indicator:hover {
+    border-color: #1f9cf0;
+}
+
 /* ── Config Role / Type inline ────────────────────────────────── */
 QLabel#ConfigInlineLabel { font-size: 12px; color: #8899b4; }
 QLineEdit#ConfigLineEdit {
@@ -336,5 +391,93 @@ QLineEdit#ExplainQueryInput:focus { border-color: #4a8adc; }
 QLabel#StatusLabel {
     color: #5a9a6a;
     font-size: 11px;
+}
+
+/* ── Shortcuts Keys Panel ──────────────────────────────────────────────── */
+QPushButton#ShortcutsBtn {
+    background-color: #111828;
+    color: #4a7ab5;
+    border: 1px solid #1e3050;
+    border-radius: 5px;
+    font-size: 16px;
+    padding: 0;
+}
+QPushButton#ShortcutsBtn:hover {
+    background-color: #1a2840;
+    color: #1f9cf0;
+    border-color: #1f6feb;
+}
+QPushButton#ShortcutsBtn:pressed {
+    background-color: #0d1828;
+}
+QFrame#ShortcutsPanelFrame {
+    background-color: #0e1420;
+    border: 1.5px solid #1e2d45;
+    border-radius: 10px;
+}
+QLabel#ShortcutsPanelIcon {
+    font-size: 16px;
+    color: #4a7ab5;
+}
+QLabel#ShortcutsPanelTitle {
+    color: #c0cedf;
+    font-size: 13px;
+    font-weight: 700;
+}
+QFrame#ShortcutsPanelDivider {
+    background-color: #1a2638;
+    max-height: 1px;
+    border: none;
+}
+QLabel#ShortcutsCategoryLabel {
+    color: #4a7ab5;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 4px 0 2px 0;
+}
+QLabel#ShortcutsKeyBadge {
+    color: #1f9cf0;
+    background-color: #0d1828;
+    border: 1px solid #1e3050;
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-size: 11px;
+    font-weight: 700;
+}
+QLabel#ShortcutsArrow {
+    color: #2a3a55;
+    font-size: 11px;
+}
+QLabel#ShortcutsDesc {
+    color: #7890a8;
+    font-size: 11px;
+}
+
+/* ── MultiSelectDropdown (config panel) ─────────────────────────────────── */
+QLineEdit#MultiSelectDisplay {
+    background-color: #141820;
+    border: 1.5px solid #273045;
+    border-radius: 6px 0 0 6px;
+    padding: 5px 10px;
+    color: #c0c8d8;
+    min-height: 26px;
+}
+QLineEdit#MultiSelectDisplay:hover {
+    border-color: #3a4a6a;
+}
+QPushButton#MultiSelectDropBtn {
+    background-color: #1a2030;
+    color: #8899b4;
+    border: 1.5px solid #273045;
+    border-left: none;
+    border-radius: 0 6px 6px 0;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 0;
+}
+QPushButton#MultiSelectDropBtn:hover {
+    background-color: #1f3050;
+    color: #ffffff;
 }
 """

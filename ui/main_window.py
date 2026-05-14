@@ -1,9 +1,10 @@
 """CORTEXHUB main window."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QPoint, QThread, Signal
 from PySide6.QtGui import QKeySequence, QShortcut, QTextCursor
 from PySide6.QtWidgets import (
+    QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -174,6 +175,13 @@ class MainWindow(QMainWindow):
         self._fullscreen_btn.setObjectName("TopBarButtonSecondary")
         self._fullscreen_btn.clicked.connect(self._toggle_fullscreen)
 
+        self._shortcuts_popup = None
+        self._shortcuts_btn = QPushButton("\u2328")
+        self._shortcuts_btn.setObjectName("ShortcutsBtn")
+        self._shortcuts_btn.setToolTip("Keyboard shortcuts reference  (F1)")
+        self._shortcuts_btn.setFixedSize(32, 28)
+        self._shortcuts_btn.clicked.connect(self._show_shortcuts_panel)
+
         self._session_badge = QLabel("○  No Profile")
         self._session_badge.setObjectName("SessionBadge")
 
@@ -192,6 +200,8 @@ class MainWindow(QMainWindow):
         top_layout = QHBoxLayout(top_bar)
         top_layout.setContentsMargins(14, 0, 14, 0)
         top_layout.setSpacing(8)
+        top_layout.addWidget(self._shortcuts_btn)
+        top_layout.addSpacing(6)
         top_layout.addWidget(context_label)
         top_layout.addSpacing(10)
         top_layout.addWidget(self._session_badge)
@@ -238,12 +248,17 @@ class MainWindow(QMainWindow):
         self._caption_btn.clicked.connect(self._toggle_live_caption)
         ph_layout.addWidget(self._caption_btn)
 
-        self._mic_btn = QPushButton("🎤")
+        self._mic_btn = QPushButton("🎤\\")
         self._mic_btn.setObjectName("PanelToolButton")
         self._mic_btn.setToolTip(
-            "Start / stop voice input from your microphone into the question box"
+            "Start / stop voice input from your microphone into the question box  (Ctrl+M)"
         )
-        self._mic_btn.setFixedSize(30, 26)
+        self._mic_btn.setFixedSize(38, 26)
+        self._mic_btn.setStyleSheet(
+            "QPushButton{background:#2a0d0d;color:#e05252;"
+            "border:1.5px solid #e05252;border-radius:5px;}"
+            "QPushButton:hover{background:#380f0f;}"
+        )
         self._mic_btn.clicked.connect(self._toggle_voice_input)
         ph_layout.addWidget(self._mic_btn)
 
@@ -280,7 +295,7 @@ class MainWindow(QMainWindow):
 
         inner = QWidget()
         self._inner_layout = QVBoxLayout(inner)
-        self._inner_layout.setContentsMargins(12, 6, 12, 10)
+        self._inner_layout.setContentsMargins(12, 8, 12, 8)
         self._inner_layout.setSpacing(6)
         self._inner_layout.addWidget(self._prompt_container)
         self._inner_layout.addWidget(self._splitter, 1)
@@ -292,6 +307,107 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+Return"), self, activated=self._on_send_clicked)
         QShortcut(QKeySequence("Ctrl+Enter"), self, activated=self._on_send_clicked)
         QShortcut(QKeySequence("F11"), self, activated=self._toggle_fullscreen)
+        QShortcut(QKeySequence("Ctrl+M"), self, activated=self._toggle_voice_input)
+        QShortcut(QKeySequence("F1"), self, activated=self._show_shortcuts_panel)
+
+    # ----------------------------------------------------------------- shortcuts panel
+    def _show_shortcuts_panel(self) -> None:
+        """Toggle the floating keyboard shortcuts reference panel."""
+        if self._shortcuts_popup and self._shortcuts_popup.isVisible():
+            self._shortcuts_popup.hide()
+            return
+        if not self._shortcuts_popup:
+            self._shortcuts_popup = self._build_shortcuts_popup()
+        # Position popup below and left-aligned to the button
+        pos = self._shortcuts_btn.mapToGlobal(
+            QPoint(0, self._shortcuts_btn.height() + 6)
+        )
+        self._shortcuts_popup.move(pos)
+        self._shortcuts_popup.show()
+        self._shortcuts_popup.raise_()
+
+    def _build_shortcuts_popup(self) -> QFrame:
+        """Build the shortcuts reference panel (created once, cached on self)."""
+        popup = QFrame(self, Qt.WindowType.Popup)
+        popup.setObjectName("ShortcutsPanelFrame")
+        popup.setFixedWidth(360)
+
+        outer = QVBoxLayout(popup)
+        outer.setContentsMargins(16, 14, 16, 16)
+        outer.setSpacing(0)
+
+        # Title row
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+        title_icon = QLabel("\u2328")
+        title_icon.setObjectName("ShortcutsPanelIcon")
+        title_lbl = QLabel("Keyboard Shortcuts")
+        title_lbl.setObjectName("ShortcutsPanelTitle")
+        title_row.addWidget(title_icon)
+        title_row.addWidget(title_lbl, 1)
+        outer.addLayout(title_row)
+        outer.addSpacing(10)
+
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setObjectName("ShortcutsPanelDivider")
+        outer.addWidget(divider)
+        outer.addSpacing(12)
+
+        _categories = [
+            ("Core Actions", [
+                ("Ctrl+Enter",  "Send question to AI"),
+                ("Ctrl+M",      "Toggle microphone on / off"),
+                ("F11",         "Toggle fullscreen"),
+                ("F1",          "Show this shortcuts panel"),
+            ]),
+            ("Text Editing", [
+                ("Ctrl+Z",      "Undo"),
+                ("Ctrl+Y",      "Redo"),
+                ("Ctrl+A",      "Select all"),
+                ("Ctrl+C",      "Copy"),
+                ("Ctrl+V",      "Paste"),
+                ("Ctrl+X",      "Cut"),
+            ]),
+            ("Panels & View", [
+                ("Ctrl+Scroll", "Zoom response text"),
+                ("Esc",         "Close popups / dismiss"),
+            ]),
+        ]
+
+        for cat_name, shortcuts in _categories:
+            cat_lbl = QLabel(cat_name.upper())
+            cat_lbl.setObjectName("ShortcutsCategoryLabel")
+            outer.addWidget(cat_lbl)
+            outer.addSpacing(6)
+
+            for key, desc in shortcuts:
+                row = QHBoxLayout()
+                row.setContentsMargins(0, 1, 0, 1)
+                row.setSpacing(0)
+
+                key_badge = QLabel(key)
+                key_badge.setObjectName("ShortcutsKeyBadge")
+                key_badge.setFixedWidth(108)
+                key_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+                arr = QLabel("\u2192")
+                arr.setObjectName("ShortcutsArrow")
+
+                desc_lbl = QLabel(desc)
+                desc_lbl.setObjectName("ShortcutsDesc")
+
+                row.addWidget(key_badge)
+                row.addSpacing(10)
+                row.addWidget(arr)
+                row.addSpacing(8)
+                row.addWidget(desc_lbl, 1)
+                outer.addLayout(row)
+                outer.addSpacing(3)
+
+            outer.addSpacing(10)
+
+        return popup
 
     # ----------------------------------------------------------------- actions
     def _on_send_clicked(self) -> None:
@@ -541,18 +657,22 @@ class MainWindow(QMainWindow):
         if self._voice_active:
             self._voice_worker.stop_voice()
             self._voice_active = False
-            self._mic_btn.setText("🎤")
-            self._mic_btn.setStyleSheet("")
+            self._mic_btn.setText("🎤\\")
+            self._mic_btn.setStyleSheet(
+                "QPushButton{background:#2a0d0d;color:#e05252;"
+                "border:1.5px solid #e05252;border-radius:5px;}"
+                "QPushButton:hover{background:#380f0f;}"
+            )
             self._voice_partial_anchor = -1
         else:
             self._voice_worker.start_voice()
             self._voice_active = True
             self._mic_btn.setText("🎤")
-            # Green pulse border when recording
+            # Blue border when recording
             self._mic_btn.setStyleSheet(
-                "QPushButton{background:#1a3a1a;color:#4ecb71;"
-                "border:2px solid #4ecb71;border-radius:5px;}"
-                "QPushButton:hover{background:#204a20;}"
+                "QPushButton{background:#0d2240;color:#1f9cf0;"
+                "border:1.5px solid #1f9cf0;border-radius:5px;}"
+                "QPushButton:hover{background:#0e2e55;}"
             )
             self._voice_partial_anchor = -1
 
@@ -629,8 +749,12 @@ class MainWindow(QMainWindow):
         self._status.setText(f"● {status}")
         if status.startswith("Error"):
             self._voice_active = False
-            self._mic_btn.setText("🎤")
-            self._mic_btn.setStyleSheet("")
+            self._mic_btn.setText("🎤\\")
+            self._mic_btn.setStyleSheet(
+                "QPushButton{background:#2a0d0d;color:#e05252;"
+                "border:1.5px solid #e05252;border-radius:5px;}"
+                "QPushButton:hover{background:#380f0f;}"
+            )
             self._voice_partial_anchor = -1
 
     # ---------------------------------------------------------------- shutdown
