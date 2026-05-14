@@ -54,6 +54,8 @@ copy .env.example .env   # then edit keys
 python main.py
 ```
 
+👉 **See [RUN_COMMANDS.md](RUN_COMMANDS.md) for detailed setup and run instructions.**
+
 ---
 
 ## Setup (Windows)

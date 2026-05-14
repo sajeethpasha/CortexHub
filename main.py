@@ -17,7 +17,7 @@ def main() -> int:
     app.setApplicationName("CORTEXHUB")
 
     window = MainWindow()
-    window.show()
+    window.showMaximized()
     return app.exec()
 
 

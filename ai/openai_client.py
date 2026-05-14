@@ -44,14 +44,18 @@ class OpenAIClient:
             raise ValueError("OPENAI_API_KEY is missing. Set it in your .env file.")
         self._client = AsyncOpenAI(api_key=self.api_key)
 
-    async def stream(self, history: list[dict[str, str]]) -> AsyncIterator[str]:
+    async def stream(
+        self,
+        history: list[dict[str, str]],
+        system_prompt: str | None = None,
+    ) -> AsyncIterator[str]:
         """Stream the assistant's reply to ``history`` as text chunks.
 
-        A system prompt is automatically prepended to enforce README-style
-        Markdown formatting in every response.
+        *system_prompt* overrides the default README-style prompt when
+        provided (e.g. interview mode). Falls back to the built-in prompt.
         """
         messages: list[dict[str, str]] = [
-            {"role": "system", "content": _README_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt or _README_SYSTEM_PROMPT},
             *history,
         ]
         stream = await self._client.chat.completions.create(

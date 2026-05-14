@@ -1,10 +1,8 @@
-"""Live-caption worker: captures system audio via WASAPI loopback and
-transcribes in real-time using Vosk (fully offline).
+"""Voice-input worker: captures microphone audio and transcribes in real-time
+using Vosk (fully offline).  Text is appended to the prompt box in append mode
+(same behaviour as the live-caption worker, but from the microphone).
 
-On first use the small English model (~50 MB) is downloaded automatically to:
-    <repo_root>/models/vosk-model-small-en-us-0.15/
-
-Requirements (install once):
+Requirements (same as caption_worker — already installed):
     pip install pyaudiowpatch vosk numpy
 """
 from __future__ import annotations
@@ -23,7 +21,7 @@ _MODEL_URL = f"https://alphacephei.com/vosk/models/{_MODEL_NAME}.zip"
 _MODEL_DIR = pathlib.Path(__file__).parent.parent / "models"
 _MODEL_PATH = _MODEL_DIR / _MODEL_NAME
 _VOSK_RATE = 16_000
-_CHUNK = 8192
+_CHUNK = 4096
 
 
 def _to_mono(data: bytes, channels: int) -> bytes:
@@ -50,12 +48,12 @@ def _resample(data: bytes, from_rate: int, to_rate: int) -> bytes:
     return resampled.tobytes()
 
 
-class CaptionWorker(QThread):
-    """Background thread that streams live captions from system audio.
+class VoiceInputWorker(QThread):
+    """Background thread that streams live voice input from the microphone.
 
     Usage:
-        worker.start_caption()   # begin capture & recognition
-        worker.stop_caption()    # stop (thread exits cleanly)
+        worker.start_voice()   # begin capture & recognition
+        worker.stop_voice()    # stop (thread exits cleanly)
 
     Signals:
         text_ready(str)        – final recognised sentence (append to prompt)
@@ -73,12 +71,12 @@ class CaptionWorker(QThread):
 
     # ------------------------------------------------------------------ public
 
-    def start_caption(self) -> None:
+    def start_voice(self) -> None:
         self._stop_event.clear()
         if not self.isRunning():
             self.start()
 
-    def stop_caption(self) -> None:
+    def stop_voice(self) -> None:
         self._stop_event.set()
 
     # ----------------------------------------------------------------- QThread
@@ -105,10 +103,13 @@ class CaptionWorker(QThread):
         try:
             import pyaudiowpatch as pyaudio  # type: ignore
         except ImportError:
-            self.status_changed.emit(
-                "Error: pyaudiowpatch not installed — run: pip install pyaudiowpatch"
-            )
-            return
+            try:
+                import pyaudio  # type: ignore  # fallback to plain pyaudio
+            except ImportError:
+                self.status_changed.emit(
+                    "Error: pyaudio not installed — run: pip install pyaudiowpatch"
+                )
+                return
 
         # ── download / load model ──────────────────────────────────────────
         if not _MODEL_PATH.exists():
@@ -132,42 +133,17 @@ class CaptionWorker(QThread):
             self.status_changed.emit(f"Error loading model: {exc}")
             return
 
-        # ── find WASAPI loopback device ────────────────────────────────────
+        # ── open default microphone ────────────────────────────────────────
         pa = pyaudio.PyAudio()
-        device_info = None
         try:
-            wasapi_info = pa.get_host_api_info_by_type(pyaudio.paWASAPI)
-            default_out = pa.get_device_info_by_index(
-                wasapi_info["defaultOutputDevice"]
-            )
-            # Prefer loopback that matches the default output device
-            for i in range(pa.get_device_count()):
-                d = pa.get_device_info_by_index(i)
-                if d.get("isLoopbackDevice", False) and default_out["name"] in d["name"]:
-                    device_info = d
-                    break
-            # Fall back to any loopback device
-            if device_info is None:
-                for i in range(pa.get_device_count()):
-                    d = pa.get_device_info_by_index(i)
-                    if d.get("isLoopbackDevice", False):
-                        device_info = d
-                        break
-        except Exception as exc:
-            self.status_changed.emit(f"Error finding audio device: {exc}")
+            device_info = pa.get_default_input_device_info()
+        except OSError as exc:
+            self.status_changed.emit(f"Error: No microphone found — {exc}")
             pa.terminate()
             return
 
-        if device_info is None:
-            self.status_changed.emit(
-                "Error: No loopback audio device found. "
-                "Make sure you are on Windows and audio is playing."
-            )
-            pa.terminate()
-            return
-
-        native_rate = int(device_info["defaultSampleRate"])
-        channels = max(1, min(int(device_info.get("maxInputChannels", 2)), 2))
+        native_rate = int(device_info.get("defaultSampleRate", 44100))
+        channels = 1  # always capture mono from mic for Vosk
         rec = KaldiRecognizer(model, _VOSK_RATE)
         rec.SetWords(False)
 
@@ -181,11 +157,11 @@ class CaptionWorker(QThread):
                 frames_per_buffer=_CHUNK,
             )
         except Exception as exc:
-            self.status_changed.emit(f"Error opening audio stream: {exc}")
+            self.status_changed.emit(f"Error opening microphone: {exc}")
             pa.terminate()
             return
 
-        self.status_changed.emit("● Live Caption ON")
+        self.status_changed.emit("🎤 Voice Input ON")
 
         try:
             while not self._stop_event.is_set():
@@ -194,8 +170,7 @@ class CaptionWorker(QThread):
                 except Exception:
                     continue
 
-                mono = _to_mono(raw, channels)
-                resampled = _resample(mono, native_rate, _VOSK_RATE)
+                resampled = _resample(raw, native_rate, _VOSK_RATE)
                 if not resampled:
                     continue
 
@@ -205,13 +180,12 @@ class CaptionWorker(QThread):
                     if text:
                         self.text_ready.emit(text + " ")
                 else:
-                    # Emit partial result for live captioning
                     partial = json.loads(rec.PartialResult())
                     partial_text = partial.get("partial", "").strip()
                     if partial_text:
-                        self.partial_text.emit(partial_text + " ")
+                        self.partial_text.emit(partial_text)
         finally:
             stream.stop_stream()
             stream.close()
             pa.terminate()
-            self.status_changed.emit("● Live Caption OFF")
+            self.status_changed.emit("🎤 Voice Input OFF")

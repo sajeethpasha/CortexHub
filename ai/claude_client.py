@@ -22,18 +22,25 @@ class ClaudeClient:
             )
         self._client = AsyncAnthropic(api_key=self.api_key)
 
-    async def stream(self, history: list[dict[str, str]]) -> AsyncIterator[str]:
+    async def stream(
+        self,
+        history: list[dict[str, str]],
+        system_prompt: str | None = None,
+    ) -> AsyncIterator[str]:
         """Stream the assistant's reply for ``history`` as text chunks.
 
-        Anthropic uses the same role/content shape as OpenAI here, but does
-        not accept any 'system' entry inside ``messages``; we don't add one.
+        *system_prompt* is passed via the top-level Anthropic ``system``
+        parameter (not inside messages). Falls back to empty when omitted.
         """
+        kwargs: dict = {
+            "model": self.model,
+            "max_tokens": 2048,
+            "messages": history,
+        }
+        if system_prompt:
+            kwargs["system"] = system_prompt
         # Anthropic requires a non-zero max_tokens
-        async with self._client.messages.stream(
-            model=self.model,
-            max_tokens=2048,
-            messages=history,
-        ) as stream:
+        async with self._client.messages.stream(**kwargs) as stream:
             async for text in stream.text_stream:
                 if text:
                     yield text

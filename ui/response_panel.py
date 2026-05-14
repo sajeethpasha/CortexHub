@@ -6,12 +6,14 @@ import html as _html
 import pathlib
 import re
 
-from PySide6.QtCore import Signal
-from PySide6.QtGui import QFont, QTextCursor
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
+from PySide6.QtGui import QCursor, QFont, QTextCursor
+from workers.voice_input_worker import VoiceInputWorker
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QTextEdit,
@@ -37,7 +39,7 @@ def _inline(text: str) -> str:
     text = re.sub(
         r"`([^`]+)`",
         r'<code style="background:#eef0f4;border-radius:3px;padding:1px 5px;'
-        r'font-family:Consolas,monospace;font-size:12px;color:#333">\1</code>',
+        r'font-family:Consolas,monospace;font-size:0.9em;color:#333">\1</code>',
         text,
     )
     return text
@@ -76,7 +78,7 @@ def _md_to_html(raw: str) -> str:
                 out.append(
                     '<pre style="background:#f6f8fa;border:1px solid #d8dde6;'
                     "border-radius:6px;padding:10px 14px;font-family:Consolas,"
-                    "monospace;font-size:12px;color:#24292e;white-space:pre-wrap;"
+                    "monospace;font-size:14px;color:#24292e;white-space:pre-wrap;"
                     f'margin:6px 0"><code>{escaped}</code></pre>'
                 )
             continue
@@ -168,6 +170,106 @@ def _md_to_html(raw: str) -> str:
     return "\n".join(out)
 
 
+# ── SelectionPopup ────────────────────────────────────────────────────────────
+
+class _SelectionPopup(QWidget):
+    """Compact frameless overlay: Explain + custom Ask on selected text."""
+
+    explain_clicked = Signal()
+    ask_clicked = Signal(str)
+
+    def __init__(self, stylesheet: str) -> None:
+        super().__init__(
+            None,
+            Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint,
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setStyleSheet(stylesheet)
+        self._build()
+
+    def _build(self) -> None:
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(5)
+
+        explain_btn = QPushButton("\u2726 Explain")
+        explain_btn.setObjectName("SelectionPopupButton")
+        explain_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        explain_btn.setFixedHeight(26)
+        explain_btn.clicked.connect(self.explain_clicked.emit)
+
+        self._input = QLineEdit()
+        self._input.setObjectName("SelectionPopupInput")
+        self._input.setPlaceholderText("Ask about selection\u2026")
+        self._input.setFixedHeight(26)
+        self._input.setMinimumWidth(170)
+        self._input.returnPressed.connect(self._on_ask)
+
+        self._mic_btn = QPushButton("\U0001f3a4")
+        self._mic_btn.setObjectName("SelectionPopupButton")
+        self._mic_btn.setFixedSize(26, 26)
+        self._mic_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._mic_btn.setToolTip("Voice input into the ask box")
+        self._mic_btn.clicked.connect(self._toggle_mic)
+
+        ask_btn = QPushButton("Ask \u2192")
+        ask_btn.setObjectName("SelectionPopupButton")
+        ask_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        ask_btn.setFixedHeight(26)
+        ask_btn.clicked.connect(self._on_ask)
+
+        layout.addWidget(explain_btn)
+        layout.addWidget(self._input)
+        layout.addWidget(self._mic_btn)
+        layout.addWidget(ask_btn)
+        self.adjustSize()
+
+        # Voice worker for this popup
+        self._voice_active = False
+        self._voice_base_text = ""
+        self._voice_worker = VoiceInputWorker(self)
+        self._voice_worker.text_ready.connect(self._on_voice_text)
+        self._voice_worker.partial_text.connect(self._on_voice_partial)
+
+    def _toggle_mic(self) -> None:
+        if self._voice_active:
+            self._voice_worker.stop_voice()
+            self._voice_active = False
+            self._mic_btn.setStyleSheet("")
+        else:
+            self._voice_base_text = self._input.text()
+            if self._voice_base_text and not self._voice_base_text.endswith(" "):
+                self._voice_base_text += " "
+            self._voice_worker.start_voice()
+            self._voice_active = True
+            self._mic_btn.setStyleSheet(
+                "background:#1a3a1a;color:#4ecb71;"
+                "border:2px solid #4ecb71;border-radius:3px;"
+            )
+
+    def _on_voice_text(self, text: str) -> None:
+        self._voice_base_text += text
+        self._input.setText(self._voice_base_text.rstrip())
+
+    def _on_voice_partial(self, text: str) -> None:
+        self._input.setText((self._voice_base_text + text).rstrip())
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        super().hideEvent(event)
+        if self._voice_active:
+            self._voice_worker.stop_voice()
+            self._voice_active = False
+            self._mic_btn.setStyleSheet("")
+            self._voice_base_text = ""
+
+    def _on_ask(self) -> None:
+        text = self._input.text().strip()
+        if text:
+            self._input.clear()
+            self._voice_base_text = ""
+            self.ask_clicked.emit(text)
+
+
 # ── ResponsePanel ─────────────────────────────────────────────────────────────
 
 class ResponsePanel(QWidget):
@@ -180,10 +282,12 @@ class ResponsePanel(QWidget):
     """
 
     detach_requested = Signal()
+    fullscreen_requested = Signal()
+    explain_requested = Signal(str, str)  # (selected_text, query)
 
-    _BASE_FONT_SIZE = 13
+    _BASE_FONT_SIZE = 16
     _MIN_FONT_SIZE = 8
-    _MAX_FONT_SIZE = 32
+    _MAX_FONT_SIZE = 72
 
     def __init__(
         self,
@@ -214,19 +318,26 @@ class ResponsePanel(QWidget):
 
         self._zoom_out_btn = QPushButton("A−")
         self._zoom_out_btn.setObjectName("PanelToolButton")
-        self._zoom_out_btn.setToolTip("Zoom Out")
+        self._zoom_out_btn.setToolTip("Zoom Out  (Ctrl+Scroll\u2193)")
         self._zoom_out_btn.setFixedSize(34, 26)
         self._zoom_out_btn.clicked.connect(self._zoom_out)
 
+        self._zoom_reset_btn = QPushButton("A\u21ba")
+        self._zoom_reset_btn.setObjectName("PanelToolButton")
+        self._zoom_reset_btn.setToolTip("Reset font size to default")
+        self._zoom_reset_btn.setFixedSize(34, 26)
+        self._zoom_reset_btn.clicked.connect(self._zoom_reset)
+
         self._zoom_in_btn = QPushButton("A+")
         self._zoom_in_btn.setObjectName("PanelToolButton")
-        self._zoom_in_btn.setToolTip("Zoom In")
+        self._zoom_in_btn.setToolTip("Zoom In  (Ctrl+Scroll\u2191)")
         self._zoom_in_btn.setFixedSize(34, 26)
         self._zoom_in_btn.clicked.connect(self._zoom_in)
 
         header_layout.addWidget(self._clear_btn)
         header_layout.addSpacing(4)
         header_layout.addWidget(self._zoom_out_btn)
+        header_layout.addWidget(self._zoom_reset_btn)
         header_layout.addWidget(self._zoom_in_btn)
 
         if show_tools:
@@ -242,8 +353,14 @@ class ResponsePanel(QWidget):
         self._detach_btn.setToolTip("Pop out to a floating window")
         self._detach_btn.setFixedHeight(26)
         self._detach_btn.clicked.connect(self.detach_requested.emit)
+        self._fullscreen_panel_btn = QPushButton("\u26f6")
+        self._fullscreen_panel_btn.setObjectName("PanelToolButton")
+        self._fullscreen_panel_btn.setToolTip("Open fullscreen in floating window")
+        self._fullscreen_panel_btn.setFixedSize(34, 26)
+        self._fullscreen_panel_btn.clicked.connect(self.fullscreen_requested.emit)
         header_layout.addSpacing(4)
         header_layout.addWidget(self._detach_btn)
+        header_layout.addWidget(self._fullscreen_panel_btn)
         header_layout.addSpacing(2)
 
         header_widget = QWidget()
@@ -264,35 +381,60 @@ class ResponsePanel(QWidget):
         layout.addWidget(header_widget)
         layout.addWidget(self._view, 1)
 
+        # Debounce timer: renders HTML at most every 100 ms during streaming
+        self._render_timer = QTimer(self)
+        self._render_timer.setSingleShot(True)
+        self._render_timer.setInterval(100)
+        self._render_timer.timeout.connect(self._do_render_update)
+
+        # Ctrl+scroll zoom
+        self._view.installEventFilter(self)
+
+        # Selection popup for Explain / Ask
+        self._current_selection: str = ""
+        self._selection_popup: _SelectionPopup | None = None
+        self._view.selectionChanged.connect(self._on_selection_changed)
+
     # ---------------------------------------------------------------- streaming
     def append_chunk(self, text: str) -> None:
-        """Buffer chunk and display plain text while streaming."""
+        """Buffer chunk and schedule HTML re-render."""
         if not text:
             return
         self._raw_buffer.append(text)
-        cursor = self._view.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertText(text)
-        self._view.setTextCursor(cursor)
-        self._view.ensureCursorVisible()
+        if not self._render_timer.isActive():
+            self._render_timer.start()
 
-    def finalize_render(self) -> None:
-        """Convert buffered Markdown to styled HTML after streaming finishes."""
+    def _do_render_update(self) -> None:
+        """Render current buffer as HTML; stay at bottom if already there."""
         raw = "".join(self._raw_buffer)
         if not raw.strip():
             return
         body = _md_to_html(raw)
-        full_html = (
-            '<div style="font-family:\'Segoe UI\',Arial,sans-serif;'
-            f'font-size:{self._font_size}px;line-height:1.65;color:#1a1a2e;padding:2px">'
-            + body
-            + "</div>"
-        )
+        full_html = self._build_html(body)
+        sb = self._view.verticalScrollBar()
+        at_bottom = sb.value() >= sb.maximum() - 40
         self._view.setHtml(full_html)
-        # Scroll to top
+        if at_bottom:
+            sb.setValue(sb.maximum())
+
+    def finalize_render(self) -> None:
+        """Final render after streaming ends — scroll to top."""
+        self._render_timer.stop()
+        raw = "".join(self._raw_buffer)
+        if not raw.strip():
+            return
+        body = _md_to_html(raw)
+        self._view.setHtml(self._build_html(body))
         cursor = self._view.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.Start)
         self._view.setTextCursor(cursor)
+
+    def _build_html(self, body: str) -> str:
+        return (
+            '<div style="font-family:\'Segoe UI\',Arial,sans-serif;'
+            f'font-size:{self._font_size}px;line-height:1.65;color:#1a1a2e;padding:2px">'
+            + body + "</div>"
+        )
 
     def append_line(self, text: str) -> None:
         prefix = "\n" if self._view.toPlainText() else ""
@@ -306,8 +448,89 @@ class ResponsePanel(QWidget):
         )
 
     def clear(self) -> None:
+        self._render_timer.stop()
         self._raw_buffer.clear()
         self._view.clear()
+
+    # ---------------------------------------------------- float mode (detach)
+    def enter_float_mode(self, float_win) -> None:
+        """Called when panel moves into a slim _FloatWindow — merge into one row."""
+        self._detach_btn.setText("\u229f Dock")
+        self._detach_btn.setToolTip("Dock back to main window")
+        self._detach_btn.clicked.disconnect()
+        self._detach_btn.clicked.connect(float_win._request_dock)
+        self._fullscreen_panel_btn.clicked.disconnect()
+        self._fullscreen_panel_btn.clicked.connect(float_win._toggle_fs)
+
+    def exit_float_mode(self) -> None:
+        """Called when panel is docked back — restore original button wiring."""
+        self._detach_btn.setText("Detach")
+        self._detach_btn.setToolTip("Pop out to a floating window")
+        self._detach_btn.clicked.disconnect()
+        self._detach_btn.clicked.connect(self.detach_requested.emit)
+        self._fullscreen_panel_btn.clicked.disconnect()
+        self._fullscreen_panel_btn.clicked.connect(self.fullscreen_requested.emit)
+
+    # -------------------------------------------- selection popup (explain)
+    def _on_selection_changed(self) -> None:
+        text = (
+            self._view.textCursor()
+            .selectedText()
+            .replace("\u2029", "\n")
+            .strip()
+        )
+        if not text:
+            # Use a short delay before hiding so a click inside the popup
+            # (which clears the view's selection) doesn't immediately close it.
+            QTimer.singleShot(200, self._maybe_hide_popup)
+            return
+        self._current_selection = text
+        if self._selection_popup is None:
+            self._selection_popup = _SelectionPopup(self.styleSheet())
+            self._selection_popup.explain_clicked.connect(self._on_popup_explain)
+            self._selection_popup.ask_clicked.connect(self._on_popup_ask)
+        # Position near cursor, clamped to screen
+        from PySide6.QtGui import QGuiApplication
+        cr = self._view.cursorRect()
+        gp = self._view.viewport().mapToGlobal(cr.bottomRight())
+        popup_w = self._selection_popup.sizeHint().width()
+        screen = QGuiApplication.screenAt(gp)
+        if screen:
+            sr = screen.availableGeometry()
+            x = min(gp.x(), sr.right() - popup_w - 10)
+            y = min(gp.y() + 4, sr.bottom() - 50)
+            self._selection_popup.move(x, y)
+        else:
+            self._selection_popup.move(gp.x(), gp.y() + 4)
+        self._selection_popup.show()
+        self._selection_popup.raise_()
+
+    def _maybe_hide_popup(self) -> None:
+        """Hide the popup unless the user is currently interacting with it."""
+        if self._selection_popup is None or not self._selection_popup.isVisible():
+            return
+        from PySide6.QtWidgets import QApplication
+        fw = QApplication.focusWidget()
+        # Keep visible if focus is inside the popup (user is typing in the input)
+        if fw is not None and (
+            fw is self._selection_popup or self._selection_popup.isAncestorOf(fw)
+        ):
+            return
+        self._selection_popup.hide()
+
+    def _on_popup_explain(self) -> None:
+        if self._current_selection:
+            self.explain_requested.emit(
+                self._current_selection, "Explain this in detail:"
+            )
+        if self._selection_popup:
+            self._selection_popup.hide()
+
+    def _on_popup_ask(self, query: str) -> None:
+        if self._current_selection and query:
+            self.explain_requested.emit(self._current_selection, query)
+        if self._selection_popup:
+            self._selection_popup.hide()
 
     # --------------------------------------------------------------------- zoom
     def _apply_font(self) -> None:
@@ -317,16 +540,31 @@ class ResponsePanel(QWidget):
 
     def _zoom_in(self) -> None:
         if self._font_size < self._MAX_FONT_SIZE:
-            self._font_size += 1
+            self._font_size += 2
             self._apply_font()
-            # Re-render HTML with updated size if content is already rendered
-            self.finalize_render()
+            self._do_render_update()
 
     def _zoom_out(self) -> None:
         if self._font_size > self._MIN_FONT_SIZE:
-            self._font_size -= 1
+            self._font_size -= 2
             self._apply_font()
-            self.finalize_render()
+            self._do_render_update()
+
+    def _zoom_reset(self) -> None:
+        self._font_size = self._BASE_FONT_SIZE
+        self._apply_font()
+        self._do_render_update()
+
+    # ---------------------------------------------------------- Ctrl+scroll zoom
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        if obj is self._view and event.type() == QEvent.Type.Wheel:
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                if event.angleDelta().y() > 0:
+                    self._zoom_in()
+                else:
+                    self._zoom_out()
+                return True
+        return super().eventFilter(obj, event)
 
     # ------------------------------------------------------------ README export
     def _export_readme(self) -> None:

@@ -167,5 +167,174 @@ QScrollBar::handle:vertical {
     border-radius: 4px;
 }
 QScrollBar::handle:vertical:hover { background: #324060; }
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QLabel#LiveCaptionLabel {
+    color: #9aa4b2;
+    font-size: 14px;
+    padding: 4px 8px;
+    background-color: #1a1f2a;
+    border-radius: 6px;
+    margin: 2px 0;
+}
+
+/* ── Session badge ────────────────────────────────────────────── */
+QLabel#SessionBadge {
+    color: #4a6a9a;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0 4px;
+}
+QLabel#SessionBadgeActive {
+    color: #4ecb71;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 0 4px;
+}
+
+/* ── Top bar interview buttons ────────────────────────────────── */
+QPushButton#ConfigureButton {
+    background-color: #0e2a2a;
+    color: #4ecbcb;
+    border: 1px solid #1a4a4a;
+    border-radius: 7px;
+    padding: 5px 14px;
+    font-weight: 600;
+    font-size: 13px;
+}
+QPushButton#ConfigureButton:hover { background-color: #143535; color: #7aeaea; }
+
+QPushButton#NewSessionButton {
+    background-color: #2a1a08;
+    color: #e09050;
+    border: 1px solid #4a3018;
+    border-radius: 7px;
+    padding: 5px 14px;
+    font-weight: 600;
+    font-size: 13px;
+}
+QPushButton#NewSessionButton:hover { background-color: #3a2210; color: #f0b070; }
+
+/* ── Config Dialog ────────────────────────────────────────────── */
+QLabel#ConfigHeader { font-size: 18px; font-weight: 700; color: #c8d8f0; padding: 4px 0; }
+QLabel#ConfigSubHeader { font-size: 12px; color: #6a7a94; }
+QLabel#ConfigSectionLabel { font-size: 12px; font-weight: 700; color: #8899b4; letter-spacing: 1px; margin-top: 4px; }
+QFrame#ConfigDivider { color: #1e2636; }
+QTextEdit#ConfigTextArea {
+    background-color: #0d1018;
+    border: 1.5px solid #273045;
+    border-radius: 6px;
+    padding: 8px;
+    color: #dce4f0;
+}
+QComboBox#ConfigCombo {
+    background-color: #141820;
+    border: 1px solid #252d3e;
+    border-radius: 6px;
+    padding: 6px 12px;
+    color: #c0c8d8;
+    min-height: 32px;
+}
+QComboBox#ConfigCombo::drop-down { border: none; width: 20px; }
+QComboBox#ConfigCombo QAbstractItemView {
+    background-color: #141820;
+    border: 1px solid #252d3e;
+    color: #c0c8d8;
+    selection-background-color: #1f6feb;
+}
+QPushButton#ConfigStartButton {
+    background-color: #1a4a2a;
+    color: #4ecb71;
+    border: 1px solid #2a6a3a;
+    border-radius: 7px;
+    padding: 8px 20px;
+    font-weight: 700;
+    font-size: 14px;
+}
+QPushButton#ConfigStartButton:hover { background-color: #204a20; color: #7aed9a; }
+QPushButton#ConfigUpdateButton {
+    background-color: #1a2a3a;
+    color: #6a9adc;
+    border: 1px solid #253050;
+    border-radius: 7px;
+    padding: 8px 16px;
+    font-weight: 600;
+}
+QPushButton#ConfigUpdateButton:hover { background-color: #1f3252; color: #8ab4f8; }
+QPushButton#ConfigCancelButton {
+    background-color: #1a1f2a;
+    color: #6a7a94;
+    border: 1px solid #252d3e;
+    border-radius: 7px;
+    padding: 8px 16px;
+}
+QPushButton#ConfigCancelButton:hover { background-color: #232c3e; color: #c0c8d8; }
+QPushButton#ConfigUploadButton {
+    background-color: #1a2030;
+    color: #8899b4;
+    border: 1px solid #252d3e;
+    border-radius: 6px;
+    padding: 6px 16px;
+}
+QPushButton#ConfigUploadButton:hover { background-color: #1e3050; color: #ffffff; }
+QLabel#ConfigUploadStatus { color: #6a7a94; font-size: 12px; }
+QTabWidget#ConfigTabs::pane { border: 1px solid #252d3e; background-color: #0d1018; }
+QTabWidget#ConfigTabs QTabBar::tab {
+    background-color: #141820;
+    color: #6a7a94;
+    border: 1px solid #252d3e;
+    padding: 6px 18px;
+}
+QTabWidget#ConfigTabs QTabBar::tab:selected {
+    background-color: #1a2030;
+    color: #c0c8d8;
+    border-bottom: 2px solid #1f6feb;
+}
+
+/* ── Config Role / Type inline ────────────────────────────────── */
+QLabel#ConfigInlineLabel { font-size: 12px; color: #8899b4; }
+QLineEdit#ConfigLineEdit {
+    background-color: #0d1018;
+    border: 1.5px solid #273045;
+    border-radius: 6px;
+    padding: 7px 10px;
+    color: #dce4f0;
+    min-height: 28px;
+}
+QLineEdit#ConfigLineEdit:focus { border-color: #1f6feb; }
+
+/* ── Selection Popup ──────────────────────────────────────────── */
+QPushButton#SelectionPopupButton {
+    background-color: #1a3050;
+    color: #7aaaf0;
+    border: 1px solid #2a4a7a;
+    border-radius: 5px;
+    padding: 2px 10px;
+    font-size: 12px;
+    font-weight: 700;
+}
+QPushButton#SelectionPopupButton:hover { background-color: #1f6feb; color: #ffffff; }
+QLineEdit#SelectionPopupInput {
+    background-color: #0d1018;
+    border: 1px solid #2a4a7a;
+    border-radius: 5px;
+    padding: 2px 8px;
+    color: #c0d0e8;
+    font-size: 12px;
+}
+QLineEdit#SelectionPopupInput:focus { border-color: #4a8adc; }
+
+QLineEdit#ExplainQueryInput {
+    background-color: #0d1018;
+    border: 1px solid #2a4a7a;
+    border-radius: 5px;
+    padding: 5px 10px;
+    color: #c8d8ee;
+    font-size: 13px;
+    min-height: 28px;
+}
+QLineEdit#ExplainQueryInput:focus { border-color: #4a8adc; }
+
+QLabel#StatusLabel {
+    color: #5a9a6a;
+    font-size: 11px;
+}
 """

@@ -1,8 +1,8 @@
 """CORTEXHUB main window."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QKeySequence, QShortcut, QTextCursor
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -25,35 +25,64 @@ class _FloatWindow(QWidget):
 
     dock_requested = Signal(object)
 
-    def __init__(self, content: QWidget, title: str, stylesheet: str) -> None:
+    def __init__(
+        self,
+        content: QWidget,
+        title: str,
+        stylesheet: str,
+        extra_bar_widgets: list | None = None,
+        slim: bool = False,
+    ) -> None:
         super().__init__(None, Qt.WindowType.Window)
         self.setWindowTitle(f"CORTEXHUB  —  {title}")
         self.setStyleSheet(stylesheet)
         self.resize(800, 560)
         self._content = content
         self._docked = False
-
-        lbl = QLabel(title)
-        lbl.setObjectName("ContextLabel")
-
-        dock_btn = QPushButton("⊟  Dock Back")
-        dock_btn.setObjectName("TopBarButtonSecondary")
-        dock_btn.clicked.connect(self._request_dock)
-
-        bar = QWidget()
-        bar.setObjectName("TopBar")
-        bl = QHBoxLayout(bar)
-        bl.setContentsMargins(14, 0, 14, 0)
-        bl.setSpacing(8)
-        bl.addWidget(lbl)
-        bl.addStretch(1)
-        bl.addWidget(dock_btn)
+        self._fs_btn = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
-        outer.addWidget(bar)
+
+        if not slim:
+            lbl = QLabel(title)
+            lbl.setObjectName("ContextLabel")
+
+            self._fs_btn = QPushButton("⛶  Fullscreen")
+            self._fs_btn.setObjectName("TopBarButtonSecondary")
+            self._fs_btn.clicked.connect(self._toggle_fs)
+
+            dock_btn = QPushButton("⊟  Dock Back")
+            dock_btn.setObjectName("TopBarButtonSecondary")
+            dock_btn.clicked.connect(self._request_dock)
+
+            bar = QWidget()
+            bar.setObjectName("TopBar")
+            bl = QHBoxLayout(bar)
+            bl.setContentsMargins(14, 0, 14, 0)
+            bl.setSpacing(8)
+            bl.addWidget(lbl)
+            bl.addStretch(1)
+            if extra_bar_widgets:
+                for w in extra_bar_widgets:
+                    bl.addWidget(w)
+                bl.addSpacing(6)
+            bl.addWidget(self._fs_btn)
+            bl.addWidget(dock_btn)
+            outer.addWidget(bar)
+
         outer.addWidget(content, 1)
+
+    def _toggle_fs(self) -> None:
+        if self.isFullScreen() or self.isMaximized():
+            self.showNormal()
+            if self._fs_btn:
+                self._fs_btn.setText("⛶  Fullscreen")
+        else:
+            self.showFullScreen()
+            if self._fs_btn:
+                self._fs_btn.setText("⊞  Restore")
 
     def _request_dock(self) -> None:
         if not self._docked:
@@ -71,6 +100,7 @@ from ui.response_panel import ResponsePanel
 from ui.styles import DARK_QSS
 from workers.ai_worker import AIWorker
 from workers.caption_worker import CaptionWorker
+from workers.voice_input_worker import VoiceInputWorker
 
 
 class MainWindow(QMainWindow):
@@ -91,6 +121,7 @@ class MainWindow(QMainWindow):
         self._worker.error_occurred.connect(self._on_error)
         self._worker.all_done.connect(self._on_all_done)
         self._worker.start()
+        self._worker.setPriority(QThread.Priority.HighPriority)
 
         # ---- ui -----------------------------------------------------------
         self._busy_models: set[str] = set()
@@ -100,10 +131,20 @@ class MainWindow(QMainWindow):
         self._claude_placeholder: QWidget | None = None
         self._prompt_float: _FloatWindow | None = None
         self._prompt_placeholder: QWidget | None = None
+        self._explain_windows: list = []  # keep refs so GC won't destroy running threads
         self._caption_active = False
         self._caption_worker = CaptionWorker(self)
         self._caption_worker.text_ready.connect(self._on_caption_text)
+        self._caption_worker.partial_text.connect(self._on_partial_caption)
         self._caption_worker.status_changed.connect(self._on_caption_status)
+        self._caption_partial_anchor = -1
+
+        self._voice_active = False
+        self._voice_worker = VoiceInputWorker(self)
+        self._voice_worker.text_ready.connect(self._on_voice_text)
+        self._voice_worker.partial_text.connect(self._on_voice_partial)
+        self._voice_worker.status_changed.connect(self._on_voice_status)
+        self._voice_partial_anchor = -1
         self._build_ui()
 
     # ---------------------------------------------------------------- ui setup
@@ -124,15 +165,27 @@ class MainWindow(QMainWindow):
         self._clear_btn.setToolTip("Clear the question / prompt")
         self._clear_btn.clicked.connect(self._clear_prompt)
 
-        self._edit_btn = QPushButton("Edit")
-        self._edit_btn.setObjectName("TopBarButtonSecondary")
-        self._edit_btn.setToolTip("Edit the current question")
-        self._edit_btn.clicked.connect(self._edit_prompt)
-        self._edit_btn.setVisible(False)
+        self._redock_btn = QPushButton("\u21ba  Redock All")
+        self._redock_btn.setObjectName("TopBarButtonSecondary")
+        self._redock_btn.setToolTip("Dock all floating panels back to main window")
+        self._redock_btn.clicked.connect(self._redock_all)
 
         self._fullscreen_btn = QPushButton("Fullscreen")
         self._fullscreen_btn.setObjectName("TopBarButtonSecondary")
         self._fullscreen_btn.clicked.connect(self._toggle_fullscreen)
+
+        self._session_badge = QLabel("○  No Profile")
+        self._session_badge.setObjectName("SessionBadge")
+
+        self._configure_btn = QPushButton("⚙  Configure")
+        self._configure_btn.setObjectName("ConfigureButton")
+        self._configure_btn.setToolTip("Set up your resume and tech stack for interview mode")
+        self._configure_btn.clicked.connect(self._on_configure_clicked)
+
+        self._new_session_btn = QPushButton("↺  New Session")
+        self._new_session_btn.setObjectName("NewSessionButton")
+        self._new_session_btn.setToolTip("Clear conversation history and start a fresh session")
+        self._new_session_btn.clicked.connect(self._on_new_session_clicked)
 
         top_bar = QWidget()
         top_bar.setObjectName("TopBar")
@@ -140,12 +193,17 @@ class MainWindow(QMainWindow):
         top_layout.setContentsMargins(14, 0, 14, 0)
         top_layout.setSpacing(8)
         top_layout.addWidget(context_label)
+        top_layout.addSpacing(10)
+        top_layout.addWidget(self._session_badge)
         top_layout.addStretch(1)
+        top_layout.addWidget(self._configure_btn)
+        top_layout.addWidget(self._new_session_btn)
+        top_layout.addSpacing(6)
         top_layout.addWidget(self._status)
         top_layout.addSpacing(12)
         top_layout.addWidget(self._send_btn)
         top_layout.addWidget(self._clear_btn)
-        top_layout.addWidget(self._edit_btn)
+        top_layout.addWidget(self._redock_btn)
         top_layout.addWidget(self._fullscreen_btn)
 
         # ---- prompt input ------------------------------------------------
@@ -180,6 +238,15 @@ class MainWindow(QMainWindow):
         self._caption_btn.clicked.connect(self._toggle_live_caption)
         ph_layout.addWidget(self._caption_btn)
 
+        self._mic_btn = QPushButton("🎤")
+        self._mic_btn.setObjectName("PanelToolButton")
+        self._mic_btn.setToolTip(
+            "Start / stop voice input from your microphone into the question box"
+        )
+        self._mic_btn.setFixedSize(30, 26)
+        self._mic_btn.clicked.connect(self._toggle_voice_input)
+        ph_layout.addWidget(self._mic_btn)
+
         self._prompt_container = QWidget()
         self._prompt_container.setObjectName("PromptContainer")
         prompt_inner = QVBoxLayout(self._prompt_container)
@@ -192,7 +259,11 @@ class MainWindow(QMainWindow):
         self._openai_panel = ResponsePanel("OpenAI GPT Response", show_tools=True)
         self._claude_panel = ResponsePanel("Claude Response", show_tools=True)
         self._openai_panel.detach_requested.connect(self._detach_openai)
+        self._openai_panel.fullscreen_requested.connect(self._fullscreen_openai)
+        self._openai_panel.explain_requested.connect(self._on_explain_requested)
         self._claude_panel.detach_requested.connect(self._detach_claude)
+        self._claude_panel.fullscreen_requested.connect(self._fullscreen_claude)
+        self._claude_panel.explain_requested.connect(self._on_explain_requested)
 
         self._splitter = _ResponseSplitter(Qt.Orientation.Horizontal)
         self._splitter.addWidget(self._openai_panel)
@@ -234,8 +305,7 @@ class MainWindow(QMainWindow):
 
         self._busy_models = {MODEL_OPENAI, MODEL_CLAUDE}
         self._send_btn.setEnabled(False)
-        self._prompt.setReadOnly(True)
-        self._edit_btn.setVisible(False)
+
         self._status.setText("● Streaming…")
 
         self._worker.submit(prompt)
@@ -247,20 +317,13 @@ class MainWindow(QMainWindow):
 
     def _clear_prompt(self) -> None:
         """Clear prompt AND both response panels, unlock for new input."""
-        self._prompt.setReadOnly(False)
         self._prompt.clear()
+        self._caption_partial_anchor = -1
         self._openai_panel.clear()
         self._claude_panel.clear()
         self._send_btn.setEnabled(True)
-        self._edit_btn.setVisible(False)
         self._status.setText("● Ready")
 
-    def _edit_prompt(self) -> None:
-        self._prompt.setReadOnly(False)
-        self._prompt.setFocus()
-        self._send_btn.setEnabled(True)
-        self._edit_btn.setVisible(False)
-        self._status.setText("● Ready")
 
     def _toggle_fullscreen(self) -> None:
         if self.isFullScreen():
@@ -286,48 +349,49 @@ class MainWindow(QMainWindow):
 
     def _on_all_done(self) -> None:
         self._busy_models.clear()
-        # Prompt stays locked — user must press Clear or Edit first
-        self._edit_btn.setVisible(True)
+        self._send_btn.setEnabled(True)
         self._status.setText("● Done")
 
-    # ── Live Caption ────────────────────────────────────────────────────────────────────
-    def _toggle_live_caption(self) -> None:
-        if self._caption_active:
-            self._caption_active = False
-            self._caption_btn.setText("⏺ Live Caption")
-            self._caption_btn.setObjectName("PanelToolButton")
-            self._caption_btn.setStyleSheet("")
-            self._caption_worker.stop_caption()
+    # ── Configure / Session ──────────────────────────────────────────────────────────
+    def _on_configure_clicked(self) -> None:
+        from ui.config_panel import ConfigDialog
+        dlg = ConfigDialog(self._session.interview_config, parent=self)
+        dlg.setStyleSheet(self.styleSheet())
+        dlg.session_started.connect(self._start_session_with_config)
+        dlg.config_updated.connect(self._apply_config)
+        dlg.exec()
+
+    def _start_session_with_config(self, config: dict) -> None:
+        self._session.set_config(config)
+        self._session.new_session(keep_config=True)
+        self._openai_panel.clear()
+        self._claude_panel.clear()
+        self._clear_prompt()
+        self._update_session_badge()
+        self._status.setText("● New session started")
+
+    def _apply_config(self, config: dict) -> None:
+        self._session.set_config(config)
+        self._update_session_badge()
+        self._status.setText("● Profile updated")
+
+    def _on_new_session_clicked(self) -> None:
+        self._session.new_session(keep_config=True)
+        self._openai_panel.clear()
+        self._claude_panel.clear()
+        self._clear_prompt()
+        self._update_session_badge()
+        self._status.setText("● New session started")
+
+    def _update_session_badge(self) -> None:
+        if self._session.has_context:
+            self._session_badge.setText("● Profile Active")
+            self._session_badge.setObjectName("SessionBadgeActive")
         else:
-            self._caption_active = True
-            self._caption_btn.setText("⏹ Stop Caption")
-            self._caption_btn.setObjectName("CaptionButtonActive")
-            self._caption_btn.setStyleSheet(
-                "QPushButton{background:#1a3a1a;color:#4ecb71;"
-                "border:1px solid #2a6a2a;border-radius:5px;}"
-                "QPushButton:hover{background:#204a20;}"
-            )
-            self._caption_worker.start_caption()
-
-    def _on_caption_text(self, text: str) -> None:
-        """Append recognised text to the prompt box."""
-        was_readonly = self._prompt.isReadOnly()
-        self._prompt.setReadOnly(False)
-        from PySide6.QtGui import QTextCursor
-        cursor = self._prompt.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        self._prompt.setTextCursor(cursor)
-        self._prompt.insertPlainText(text)
-        self._prompt.setReadOnly(was_readonly)
-
-    def _on_caption_status(self, status: str) -> None:
-        self._status.setText(status)
-        if status.startswith("Error"):
-            # Reset button state on error
-            self._caption_active = False
-            self._caption_btn.setText("⏺ Live Caption")
-            self._caption_btn.setObjectName("PanelToolButton")
-            self._caption_btn.setStyleSheet("")
+            self._session_badge.setText("○  No Profile")
+            self._session_badge.setObjectName("SessionBadge")
+        self._session_badge.style().unpolish(self._session_badge)
+        self._session_badge.style().polish(self._session_badge)
 
     # ─── Detach / Dock ─────────────────────────────────────────────────────────────────────────
     def _detach_openai(self) -> None:
@@ -337,12 +401,14 @@ class MainWindow(QMainWindow):
         self._openai_placeholder = QWidget()
         self._splitter.replaceWidget(0, self._openai_placeholder)
         self._openai_float = _FloatWindow(
-            self._openai_panel, "OpenAI GPT Response", self.styleSheet()
+            self._openai_panel, "OpenAI GPT Response", self.styleSheet(), slim=True
         )
+        self._openai_panel.enter_float_mode(self._openai_float)
         self._openai_float.dock_requested.connect(self._dock_openai)
         self._openai_float.show()
 
     def _dock_openai(self, _=None) -> None:
+        self._openai_panel.exit_float_mode()
         self._splitter.replaceWidget(0, self._openai_panel)
         self._openai_placeholder.deleteLater()
         self._openai_placeholder = None
@@ -357,12 +423,14 @@ class MainWindow(QMainWindow):
         self._claude_placeholder = QWidget()
         self._splitter.replaceWidget(1, self._claude_placeholder)
         self._claude_float = _FloatWindow(
-            self._claude_panel, "Claude Response", self.styleSheet()
+            self._claude_panel, "Claude Response", self.styleSheet(), slim=True
         )
+        self._claude_panel.enter_float_mode(self._claude_float)
         self._claude_float.dock_requested.connect(self._dock_claude)
         self._claude_float.show()
 
     def _dock_claude(self, _=None) -> None:
+        self._claude_panel.exit_float_mode()
         self._splitter.replaceWidget(1, self._claude_panel)
         self._claude_placeholder.deleteLater()
         self._claude_placeholder = None
@@ -370,22 +438,76 @@ class MainWindow(QMainWindow):
         win.hide()
         win.deleteLater()
 
+    def _fullscreen_openai(self) -> None:
+        self._detach_openai()
+        if self._openai_float:
+            self._openai_float.showFullScreen()
+
+    def _fullscreen_claude(self) -> None:
+        self._detach_claude()
+        if self._claude_float:
+            self._claude_float.showFullScreen()
+
+    def _redock_all(self) -> None:
+        """Dock all floating panels back into the main window."""
+        if self._openai_float:
+            self._dock_openai()
+        if self._claude_float:
+            self._dock_claude()
+        if self._prompt_float:
+            self._dock_prompt()
+
+    def _on_explain_requested(self, selected_text: str, query: str) -> None:
+        from ui.explain_window import ExplainWindow
+        win = ExplainWindow(selected_text, query, self.styleSheet())
+        self._explain_windows.append(win)
+        win.closed.connect(lambda w=win: self._explain_windows.remove(w) if w in self._explain_windows else None)
+        win.show()
+        win.raise_()
+
     def _detach_prompt(self) -> None:
         if self._prompt_float:
             self._prompt_float.raise_()
             return
+        # Allow the text area to expand freely in the float window
+        self._prompt.setMinimumHeight(60)
+        self._prompt.setMaximumHeight(16_777_215)
         self._prompt_placeholder = QWidget()
         self._prompt_placeholder.setFixedHeight(10)
         idx = self._inner_layout.indexOf(self._prompt_container)
         self._inner_layout.removeWidget(self._prompt_container)
         self._inner_layout.insertWidget(idx, self._prompt_placeholder)
+
+        # Toolbar buttons for the float window
+        _send = QPushButton("Send")
+        _send.setObjectName("TopBarButton")
+        _send.clicked.connect(self._on_send_clicked)
+
+        _clr_q = QPushButton("Clear Q")
+        _clr_q.setObjectName("TopBarButtonSecondary")
+        _clr_q.setToolTip("Clear question text only")
+        _clr_q.clicked.connect(self._prompt.clear)
+
+        _clr_all = QPushButton("Clear All")
+        _clr_all.setObjectName("TopBarButtonSecondary")
+        _clr_all.setToolTip("Clear question and both responses")
+        _clr_all.clicked.connect(self._clear_prompt)
+
         self._prompt_float = _FloatWindow(
-            self._prompt_container, "Question Box", self.styleSheet()
+            self._prompt_container, "Question Box", self.styleSheet(),
+            extra_bar_widgets=[_send, _clr_q, _clr_all],
         )
+        self._prompt_float.resize(960, 560)
         self._prompt_float.dock_requested.connect(self._dock_prompt)
+        # Ctrl+Enter submits from the float window
+        QShortcut(QKeySequence("Ctrl+Return"), self._prompt_float,
+                  activated=self._on_send_clicked)
+        QShortcut(QKeySequence("Ctrl+Enter"), self._prompt_float,
+                  activated=self._on_send_clicked)
         self._prompt_float.show()
 
     def _dock_prompt(self, _=None) -> None:
+        self._prompt.setFixedHeight(116)
         idx = self._inner_layout.indexOf(self._prompt_placeholder)
         self._inner_layout.removeWidget(self._prompt_placeholder)
         self._inner_layout.insertWidget(idx, self._prompt_container)
@@ -395,6 +517,122 @@ class MainWindow(QMainWindow):
         win.hide()
         win.deleteLater()
 
+    def _toggle_live_caption(self) -> None:
+        if self._caption_active:
+            self._caption_worker.stop_caption()
+            self._caption_active = False
+            self._caption_btn.setText("⏺ Live Caption")
+            self._caption_btn.setObjectName("PanelToolButton")
+            self._caption_btn.setStyleSheet("")
+            self._caption_partial_anchor = -1
+        else:
+            self._caption_worker.start_caption()
+            self._caption_active = True
+            self._caption_btn.setText("⏸ Stop Caption")
+            self._caption_btn.setObjectName("CaptionButtonActive")
+            self._caption_btn.setStyleSheet(
+                "QPushButton{background:#1a3a1a;color:#4ecb71;"
+                "border:1px solid #2a6a2a;border-radius:5px;}"
+                "QPushButton:hover{background:#204a20;}"
+            )
+            self._caption_partial_anchor = -1
+
+    def _toggle_voice_input(self) -> None:
+        if self._voice_active:
+            self._voice_worker.stop_voice()
+            self._voice_active = False
+            self._mic_btn.setText("🎤")
+            self._mic_btn.setStyleSheet("")
+            self._voice_partial_anchor = -1
+        else:
+            self._voice_worker.start_voice()
+            self._voice_active = True
+            self._mic_btn.setText("🎤")
+            # Green pulse border when recording
+            self._mic_btn.setStyleSheet(
+                "QPushButton{background:#1a3a1a;color:#4ecb71;"
+                "border:2px solid #4ecb71;border-radius:5px;}"
+                "QPushButton:hover{background:#204a20;}"
+            )
+            self._voice_partial_anchor = -1
+
+    def _on_caption_text(self, text: str) -> None:
+        """Commit final recognised sentence; replace any in-progress partial."""
+        cursor = self._prompt.textCursor()
+        if self._caption_partial_anchor >= 0:
+            cursor.setPosition(self._caption_partial_anchor)
+            cursor.movePosition(QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
+        else:
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.insertText(text + " ")
+        self._prompt.setTextCursor(cursor)
+        self._caption_partial_anchor = -1
+
+    def _on_partial_caption(self, text: str) -> None:
+        """Replace the current in-progress partial with the latest Vosk partial."""
+        if not text:
+            return
+        cursor = self._prompt.textCursor()
+        if self._caption_partial_anchor < 0:
+            # First partial — record anchor at current end
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            self._caption_partial_anchor = cursor.position()
+        else:
+            # Remove previous partial text back to anchor
+            cursor.setPosition(self._caption_partial_anchor)
+            cursor.movePosition(QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
+        cursor.insertText(text)
+        self._prompt.setTextCursor(cursor)
+
+    def _on_caption_status(self, status: str) -> None:
+        """Update status label with caption worker status."""
+        self._status.setText(f"● {status}")
+        if status.startswith("Error"):
+            self._caption_active = False
+            self._caption_btn.setText("⏺ Live Caption")
+            self._caption_btn.setObjectName("PanelToolButton")
+            self._caption_btn.setStyleSheet("")
+
+    # -------------------------------------------------------- voice input events
+    def _on_voice_text(self, text: str) -> None:
+        """Commit final voice sentence; replace any in-progress partial."""
+        cursor = self._prompt.textCursor()
+        if self._voice_partial_anchor >= 0:
+            cursor.setPosition(self._voice_partial_anchor)
+            cursor.movePosition(QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
+        else:
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.insertText(text + " ")
+        self._prompt.setTextCursor(cursor)
+        self._voice_partial_anchor = -1
+
+    def _on_voice_partial(self, text: str) -> None:
+        """Show live partial voice transcription in the prompt box."""
+        if not text:
+            return
+        cursor = self._prompt.textCursor()
+        if self._voice_partial_anchor < 0:
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            self._voice_partial_anchor = cursor.position()
+        else:
+            cursor.setPosition(self._voice_partial_anchor)
+            cursor.movePosition(QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
+        cursor.insertText(text)
+        self._prompt.setTextCursor(cursor)
+
+    def _on_voice_status(self, status: str) -> None:
+        """Update status label; reset mic button on error."""
+        self._status.setText(f"● {status}")
+        if status.startswith("Error"):
+            self._voice_active = False
+            self._mic_btn.setText("🎤")
+            self._mic_btn.setStyleSheet("")
+            self._voice_partial_anchor = -1
+
     # ---------------------------------------------------------------- shutdown
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt signature
         for win in (self._openai_float, self._claude_float, self._prompt_float):
@@ -403,6 +641,8 @@ class MainWindow(QMainWindow):
                 win.close()
         self._caption_worker.stop_caption()
         self._caption_worker.wait(3000)
+        self._voice_worker.stop_voice()
+        self._voice_worker.wait(3000)
         try:
             self._worker.stop()
         finally:
