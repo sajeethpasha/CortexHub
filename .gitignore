@@ -3,6 +3,12 @@
 __pycache__/
 *.pyc
 *.pyo
-cortexhub.db
+*.db
 models/
+
+# RAG local vector store (each developer builds their own)
+.chroma/
+
+# Uploaded documents (local to each machine)
+rag/uploads/
 
