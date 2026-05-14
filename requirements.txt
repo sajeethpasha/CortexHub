@@ -5,3 +5,5 @@ python-dotenv>=1.0.0
 pyaudiowpatch>=0.2.12
 vosk>=0.3.45
 numpy>=1.24.0
+chromadb>=0.5.0
+pypdf>=4.0.0

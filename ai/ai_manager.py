@@ -5,6 +5,7 @@ from typing import AsyncIterator
 
 from ai.claude_client import ClaudeClient
 from ai.openai_client import OpenAIClient
+from rag.retriever import retrieve as rag_retrieve
 from sessions.session_manager import MODEL_CLAUDE, MODEL_OPENAI, SessionManager
 
 _INTERVIEW_SYSTEM_TEMPLATE = """\
@@ -100,6 +101,12 @@ class AIManager:
         history = self.session.get_history(model_name)
         client = self._get_client(model_name)
         system_prompt = _build_interview_prompt(self.session.interview_config)
+
+        # RAG: retrieve relevant context and append to system prompt
+        rag_context = rag_retrieve(prompt)
+        if rag_context:
+            system_prompt = f"{system_prompt}\n\n{rag_context}"
+
         async for chunk in client.stream(history, system_prompt=system_prompt):
             yield chunk
 
