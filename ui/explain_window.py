@@ -60,7 +60,7 @@ class ExplainWindow(QWidget):
 
     closed = Signal()  # emitted on close so MainWindow can purge from its list
 
-    _BASE_FONT_SIZE = 16
+    _BASE_FONT_SIZE = 18
     _MIN_FONT_SIZE = 8
     _MAX_FONT_SIZE = 72
 
@@ -198,7 +198,19 @@ class ExplainWindow(QWidget):
         super().showEvent(event)
         self._query_input.setFocus()
 
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if event.key() == Qt.Key.Key_Escape:
+            self._clear_response()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
     # ------------------------------------------------------------------ lifecycle
+    def _clear_response(self) -> None:
+        self._buffer.clear()
+        self._view.clear()
+        self._status_lbl.setText("")
+
     def closeEvent(self, event) -> None:  # noqa: N802
         if self._query_voice_active:
             self._query_voice_worker.stop_voice()
@@ -217,13 +229,13 @@ class ExplainWindow(QWidget):
 
     def _zoom_in(self) -> None:
         if self._font_size < self._MAX_FONT_SIZE:
-            self._font_size += 2
+            self._font_size += 1
             self._apply_font()
             self._do_render_update()
 
     def _zoom_out(self) -> None:
         if self._font_size > self._MIN_FONT_SIZE:
-            self._font_size -= 2
+            self._font_size -= 1
             self._apply_font()
             self._do_render_update()
 
@@ -274,13 +286,18 @@ class ExplainWindow(QWidget):
             )
 
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
-        if obj is self._view and event.type() == QEvent.Type.Wheel:
-            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-                if event.angleDelta().y() > 0:
-                    self._zoom_in()
-                else:
-                    self._zoom_out()
-                return True
+        if obj is self._view:
+            if event.type() == QEvent.Type.Wheel:
+                if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                    if event.angleDelta().y() > 0:
+                        self._zoom_in()
+                    else:
+                        self._zoom_out()
+                    return True
+            if event.type() == QEvent.Type.KeyPress:
+                if event.key() == Qt.Key.Key_Escape:
+                    self._clear_response()
+                    return True
         return super().eventFilter(obj, event)
 
     def _do_render_update(self) -> None:
@@ -299,7 +316,7 @@ class ExplainWindow(QWidget):
     def _build_html(self, body: str) -> str:
         return (
             "<div style=\"font-family:'Segoe UI',Arial,sans-serif;"
-            f"font-size:{self._font_size}px;line-height:1.65;color:#1a1a2e;padding:4px\">"
+            f"font-size:{self._font_size}px;line-height:1.75;color:#1a1a2e;padding:6px 4px\">"
             + body
             + "</div>"
         )

@@ -122,6 +122,52 @@ QPushButton#PanelToolButton {
 QPushButton#PanelToolButton:hover   { background-color: #1e3050; color: #ffffff; border-color: #2a5298; }
 QPushButton#PanelToolButton:pressed { background-color: #131928; }
 
+QWidget#PanelZoomGroup {
+    background-color: #151d2d;
+    border: 1px solid #252d3e;
+    border-radius: 5px;
+}
+
+QPushButton#ZoomPercentButton {
+    background-color: transparent;
+    color: #c8d0e0;
+    border: none;
+    padding: 2px 4px;
+    font-size: 12px;
+    font-weight: 700;
+}
+QPushButton#ZoomPercentButton:hover   { background-color: #1e3050; color: #ffffff; }
+QPushButton#ZoomPercentButton:pressed { background-color: #131928; }
+
+QSlider#PanelZoomSlider {
+    min-width: 76px;
+    max-width: 130px;
+}
+QSlider#PanelZoomSlider::groove:horizontal {
+    height: 4px;
+    background: #252d3e;
+    border-radius: 2px;
+}
+QSlider#PanelZoomSlider::sub-page:horizontal {
+    background: #4a7fcb;
+    border-radius: 2px;
+}
+QSlider#PanelZoomSlider::add-page:horizontal {
+    background: #252d3e;
+    border-radius: 2px;
+}
+QSlider#PanelZoomSlider::handle:horizontal {
+    background: #6fa3ff;
+    border: 1px solid #9dbfff;
+    width: 11px;
+    height: 11px;
+    margin: -4px 0;
+    border-radius: 6px;
+}
+QSlider#PanelZoomSlider::handle:horizontal:hover {
+    background: #8bb6ff;
+}
+
 /* ── Response view (white bg, rich text) ─────────────────────── */
 QTextEdit#ResponseView {
     background-color: #ffffff;
@@ -133,8 +179,8 @@ QTextEdit#ResponseView {
     border-bottom-left-radius: 8px;
     border-bottom-right-radius: 8px;
     padding: 10px 14px;
-    selection-background-color: #1f6feb;
-    selection-color: #ffffff;
+    selection-background-color: #fff59d;
+    selection-color: #1a1a2e;
 }
 
 QPushButton#ClearBothButton {

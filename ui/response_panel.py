@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QSlider,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -39,7 +40,7 @@ def _inline(text: str) -> str:
     text = re.sub(
         r"`([^`]+)`",
         r'<code style="background:#eef0f4;border-radius:3px;padding:1px 5px;'
-        r'font-family:Consolas,monospace;font-size:0.9em;color:#333">\1</code>',
+        r'font-family:Consolas,monospace;font-size:1em;color:#b5333a">\1</code>',
         text,
     )
     return text
@@ -77,9 +78,9 @@ def _md_to_html(raw: str) -> str:
                 escaped = _html.escape("\n".join(code_buf))
                 out.append(
                     '<pre style="background:#f6f8fa;border:1px solid #d8dde6;'
-                    "border-radius:6px;padding:10px 14px;font-family:Consolas,"
-                    "monospace;font-size:14px;color:#24292e;white-space:pre-wrap;"
-                    f'margin:6px 0"><code>{escaped}</code></pre>'
+                    "border-radius:6px;padding:12px 16px;font-family:Consolas,"
+                    "monospace;font-size:15px;color:#24292e;white-space:pre-wrap;"
+                    f'margin:8px 0"><code>{escaped}</code></pre>'
                 )
             continue
 
@@ -125,7 +126,7 @@ def _md_to_html(raw: str) -> str:
                 out.append('<ul style="margin:4px 0;padding-left:22px;list-style-type:disc">')
                 in_ul = True
             out.append(
-                '<li style="margin:2px 0;line-height:1.6">'
+                '<li style="margin:3px 0;line-height:1.75">'
                 + _inline(_html.escape(stripped[2:])) + "</li>"
             )
 
@@ -136,7 +137,7 @@ def _md_to_html(raw: str) -> str:
                 in_ol = True
             content = re.sub(r"^\d+\.\s+", "", stripped)
             out.append(
-                '<li style="margin:2px 0;line-height:1.6">'
+                '<li style="margin:3px 0;line-height:1.75">'
                 + _inline(_html.escape(content)) + "</li>"
             )
 
@@ -162,7 +163,7 @@ def _md_to_html(raw: str) -> str:
         # ── normal paragraph ────────────────────────────────────────
         else:
             out.append(
-                '<p style="margin:2px 0;line-height:1.65;color:#1a1a2e">'
+                '<p style="margin:4px 0;line-height:1.75;color:#1a1a2e">'
                 + _inline(_html.escape(stripped)) + "</p>"
             )
 
@@ -303,7 +304,7 @@ class _SelectionPopup(QWidget):
 class ResponsePanel(QWidget):
     """Title bar + rich-text response view that streams AI output.
 
-    Every panel has Clear, Zoom Out and Zoom In controls.
+    Every panel has Clear and Word-style zoom controls.
     When *show_tools* is True, an Export-as-README button is also shown.
     After streaming completes, call ``finalize_render()`` to convert the
     accumulated Markdown buffer to styled HTML.
@@ -314,8 +315,10 @@ class ResponsePanel(QWidget):
     explain_requested = Signal(str, str)  # (selected_text, query)
 
     _BASE_FONT_SIZE = 16
-    _MIN_FONT_SIZE = 8
-    _MAX_FONT_SIZE = 72
+    _MIN_ZOOM_PERCENT = 50
+    _MAX_ZOOM_PERCENT = 300
+    _DEFAULT_ZOOM_PERCENT = 100
+    _ZOOM_STEP = 10
 
     def __init__(
         self,
@@ -324,6 +327,7 @@ class ResponsePanel(QWidget):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self._zoom_percent = self._DEFAULT_ZOOM_PERCENT
         self._font_size = self._BASE_FONT_SIZE
         self._title_text = title
         self._raw_buffer: list[str] = []
@@ -337,36 +341,66 @@ class ResponsePanel(QWidget):
         header_layout.setSpacing(4)
         header_layout.addWidget(self._title_label, 1)
 
-        # Always-present: Clear, A−, A+
+        # Always-present: Clear and Word-style zoom controls.
         self._clear_btn = QPushButton("Clear")
         self._clear_btn.setObjectName("PanelToolButton")
         self._clear_btn.setToolTip("Clear this response")
         self._clear_btn.setFixedHeight(26)
         self._clear_btn.clicked.connect(self.clear)
 
-        self._zoom_out_btn = QPushButton("A−")
+        self._zoom_out_btn = QPushButton("-A")
         self._zoom_out_btn.setObjectName("PanelToolButton")
-        self._zoom_out_btn.setToolTip("Zoom Out  (Ctrl+Scroll\u2193)")
-        self._zoom_out_btn.setFixedSize(34, 26)
+        self._zoom_out_btn.setToolTip("Zoom Out")
+        self._zoom_out_btn.setFixedSize(38, 26)
         self._zoom_out_btn.clicked.connect(self._zoom_out)
-
-        self._zoom_reset_btn = QPushButton("A\u21ba")
-        self._zoom_reset_btn.setObjectName("PanelToolButton")
-        self._zoom_reset_btn.setToolTip("Reset font size to default")
-        self._zoom_reset_btn.setFixedSize(34, 26)
-        self._zoom_reset_btn.clicked.connect(self._zoom_reset)
 
         self._zoom_in_btn = QPushButton("A+")
         self._zoom_in_btn.setObjectName("PanelToolButton")
-        self._zoom_in_btn.setToolTip("Zoom In  (Ctrl+Scroll\u2191)")
-        self._zoom_in_btn.setFixedSize(34, 26)
+        self._zoom_in_btn.setToolTip("Zoom In")
+        self._zoom_in_btn.setFixedSize(38, 26)
         self._zoom_in_btn.clicked.connect(self._zoom_in)
+
+        self._zoom_percent_btn = QPushButton("100%")
+        self._zoom_percent_btn.setObjectName("ZoomPercentButton")
+        self._zoom_percent_btn.setToolTip("Reset zoom to 100%")
+        self._zoom_percent_btn.setFixedSize(54, 26)
+        self._zoom_percent_btn.clicked.connect(self._zoom_reset)
+
+        self._zoom_slider = QSlider(Qt.Orientation.Horizontal)
+        self._zoom_slider.setObjectName("PanelZoomSlider")
+        self._zoom_slider.setToolTip("Adjust zoom")
+        self._zoom_slider.setRange(self._MIN_ZOOM_PERCENT, self._MAX_ZOOM_PERCENT)
+        self._zoom_slider.setSingleStep(5)
+        self._zoom_slider.setPageStep(self._ZOOM_STEP)
+        self._zoom_slider.setValue(self._DEFAULT_ZOOM_PERCENT)
+        self._zoom_slider.setMinimumWidth(76)
+        self._zoom_slider.setMaximumWidth(130)
+        self._zoom_slider.valueChanged.connect(self._set_zoom_percent)
+
+        zoom_layout = QHBoxLayout()
+        zoom_layout.setContentsMargins(0, 0, 0, 0)
+        zoom_layout.setSpacing(3)
+        zoom_layout.addWidget(self._zoom_out_btn)
+        zoom_layout.addWidget(self._zoom_percent_btn)
+        zoom_layout.addWidget(self._zoom_in_btn)
+        zoom_layout.addWidget(self._zoom_slider)
+
+        self._zoom_group = QWidget()
+        self._zoom_group.setObjectName("PanelZoomGroup")
+        self._zoom_group.setLayout(zoom_layout)
+        self._zoom_group.setFixedHeight(26)
+        for zoom_widget in (
+            self._zoom_group,
+            self._zoom_out_btn,
+            self._zoom_percent_btn,
+            self._zoom_in_btn,
+            self._zoom_slider,
+        ):
+            zoom_widget.installEventFilter(self)
 
         header_layout.addWidget(self._clear_btn)
         header_layout.addSpacing(4)
-        header_layout.addWidget(self._zoom_out_btn)
-        header_layout.addWidget(self._zoom_reset_btn)
-        header_layout.addWidget(self._zoom_in_btn)
+        header_layout.addWidget(self._zoom_group)
 
         if show_tools:
             self._readme_btn = QPushButton("↓ README")
@@ -460,7 +494,7 @@ class ResponsePanel(QWidget):
     def _build_html(self, body: str) -> str:
         return (
             '<div style="font-family:\'Segoe UI\',Arial,sans-serif;'
-            f'font-size:{self._font_size}px;line-height:1.65;color:#1a1a2e;padding:2px">'
+            f'font-size:{self._font_size}px;line-height:1.75;color:#1a1a2e;padding:4px">'
             + body + "</div>"
         )
 
@@ -563,28 +597,56 @@ class ResponsePanel(QWidget):
     # --------------------------------------------------------------------- zoom
     def _apply_font(self) -> None:
         font = QFont("Segoe UI")
-        font.setPointSize(self._font_size)
+        font.setPointSizeF(self._font_size)
         self._view.setFont(font)
 
+    def _set_zoom_percent(self, percent: int) -> None:
+        percent = max(self._MIN_ZOOM_PERCENT, min(self._MAX_ZOOM_PERCENT, percent))
+        if percent == self._zoom_percent:
+            self._sync_zoom_controls()
+            return
+        self._zoom_percent = percent
+        self._font_size = self._BASE_FONT_SIZE * (self._zoom_percent / 100)
+        self._apply_font()
+        self._sync_zoom_controls()
+        self._do_render_update()
+
+    def _sync_zoom_controls(self) -> None:
+        if not hasattr(self, "_zoom_slider"):
+            return
+        self._zoom_percent_btn.setText(f"{self._zoom_percent}%")
+        self._zoom_out_btn.setEnabled(self._zoom_percent > self._MIN_ZOOM_PERCENT)
+        self._zoom_in_btn.setEnabled(self._zoom_percent < self._MAX_ZOOM_PERCENT)
+        self._zoom_slider.blockSignals(True)
+        self._zoom_slider.setValue(self._zoom_percent)
+        self._zoom_slider.blockSignals(False)
+
     def _zoom_in(self) -> None:
-        if self._font_size < self._MAX_FONT_SIZE:
-            self._font_size += 2
-            self._apply_font()
-            self._do_render_update()
+        self._set_zoom_percent(self._zoom_percent + self._ZOOM_STEP)
 
     def _zoom_out(self) -> None:
-        if self._font_size > self._MIN_FONT_SIZE:
-            self._font_size -= 2
-            self._apply_font()
-            self._do_render_update()
+        self._set_zoom_percent(self._zoom_percent - self._ZOOM_STEP)
 
     def _zoom_reset(self) -> None:
-        self._font_size = self._BASE_FONT_SIZE
-        self._apply_font()
-        self._do_render_update()
+        self._set_zoom_percent(self._DEFAULT_ZOOM_PERCENT)
 
     # ---------------------------------------------------------- Ctrl+scroll zoom
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        if (
+            obj in (
+                self._zoom_group,
+                self._zoom_out_btn,
+                self._zoom_percent_btn,
+                self._zoom_in_btn,
+                self._zoom_slider,
+            )
+            and event.type() == QEvent.Type.Wheel
+        ):
+            if event.angleDelta().y() > 0:
+                self._zoom_in()
+            else:
+                self._zoom_out()
+            return True
         if obj is self._view:
             if event.type() == QEvent.Type.Wheel:
                 if event.modifiers() & Qt.KeyboardModifier.ControlModifier:

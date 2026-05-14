@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CortexHub — Zoom Control Demo</title>
+
+  <!-- ═══════════════════════════════════════ STYLES ══════════════════════════════════════ -->
+  <style>
+    /* ── Base ──────────────────────────────────────────────────────────────── */
+    :root {
+      --bg:          #1a1a2e;
+      --surface:     #16213e;
+      --panel:       #0f1b2d;
+      --border:      #1e2636;
+      --text:        #c8d0e0;
+      --text-muted:  #6b7a99;
+      --accent:      #4a7fcb;
+      --accent-glow: rgba(74, 127, 203, 0.35);
+      --btn-bg:      #1a2030;
+      --btn-hover:   #1e3050;
+      --btn-active:  #131928;
+      --track-fill:  #252d3e;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Top Toolbar (mimics the app header) ───────────────────────────────── */
+    .toolbar {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 7px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .toolbar-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+      flex: 1;
+    }
+
+    .toolbar-btn {
+      background: var(--btn-bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 3px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.15s, color 0.15s;
+    }
+    .toolbar-btn:hover  { background: var(--btn-hover); color: #ffffff; }
+    .toolbar-btn:active { background: var(--btn-active); }
+
+    /* ── Editor Area ───────────────────────────────────────────────────────── */
+    .editor-wrap {
+      flex: 1;
+      overflow: auto;
+      padding: 32px 20px;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+    }
+
+    .editor-page {
+      background: #ffffff;
+      color: #1a1a2e;
+      width: 720px;
+      min-height: 480px;
+      border-radius: 6px;
+      padding: 48px 56px;
+      box-shadow: 0 6px 32px rgba(0, 0, 0, 0.5);
+      transform-origin: top center;
+      /* zoom transition handled by JS nudging the property */
+      transition: zoom 0.08s ease, -webkit-zoom 0.08s ease;
+    }
+
+    .editor-page h1 {
+      font-size: 22px;
+      margin-bottom: 14px;
+      color: #1a1a2e;
+    }
+
+    .editor-page h2 {
+      font-size: 16px;
+      font-weight: 700;
+      margin: 20px 0 8px;
+      color: #1a1a2e;
+      border-bottom: 1px solid #e0e4ea;
+      padding-bottom: 4px;
+    }
+
+    .editor-page p {
+      font-size: 14px;
+      line-height: 1.75;
+      margin-bottom: 12px;
+      color: #333;
+    }
+
+    .editor-page code {
+      background: #eef0f4;
+      border-radius: 3px;
+      padding: 1px 5px;
+      font-family: Consolas, monospace;
+      font-size: 13px;
+      color: #b5333a;
+    }
+
+    .editor-page ul {
+      margin: 8px 0 12px 22px;
+      padding: 0;
+    }
+
+    .editor-page li {
+      font-size: 14px;
+      line-height: 1.75;
+      color: #333;
+      margin-bottom: 4px;
+    }
+
+    /* ── Word-style Status / Zoom Bar ──────────────────────────────────────── */
+    .zoom-bar {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: 5px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+      user-select: none;
+    }
+
+    /* -A / A+ buttons */
+    .zoom-btn {
+      background: var(--btn-bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 3px 10px;
+      font-size: 13px;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.12s, color 0.12s, border-color 0.12s;
+      min-width: 38px;
+      text-align: center;
+    }
+    .zoom-btn:hover  { background: var(--btn-hover); color: #ffffff; border-color: var(--accent); }
+    .zoom-btn:active { background: var(--btn-active); }
+
+    /* Percentage label */
+    .zoom-pct {
+      min-width: 52px;
+      text-align: center;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+      cursor: pointer;
+      border-radius: 4px;
+      padding: 2px 4px;
+      transition: background 0.12s, color 0.12s;
+    }
+    .zoom-pct:hover  { background: var(--btn-hover); color: #ffffff; }
+    .zoom-pct:active { background: var(--btn-active); }
+
+    /* Divider */
+    .zoom-divider {
+      width: 1px;
+      height: 18px;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+
+    /* Slider group */
+    .zoom-slider-group {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      max-width: 360px;
+    }
+
+    .zoom-bound-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    /* Range slider */
+    .zoom-range {
+      -webkit-appearance: none;
+      appearance: none;
+      flex: 1;
+      height: 4px;
+      border-radius: 2px;
+      outline: none;
+      cursor: pointer;
+      background: var(--track-fill); /* overridden by JS */
+    }
+
+    .zoom-range::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+      box-shadow: 0 0 5px var(--accent-glow);
+      transition: transform 0.1s, background 0.12s;
+    }
+    .zoom-range::-webkit-slider-thumb:hover {
+      background: #5b8ee8;
+      transform: scale(1.25);
+    }
+    .zoom-range::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: none;
+      cursor: pointer;
+      box-shadow: 0 0 5px var(--accent-glow);
+    }
+
+    /* Tooltip on zoom buttons */
+    .zoom-btn[title]:hover::after {
+      content: attr(title);
+      position: absolute;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #0f1b2d;
+      color: #c8d0e0;
+      font-size: 11px;
+      white-space: nowrap;
+      padding: 3px 7px;
+      border-radius: 4px;
+      border: 1px solid #1e2636;
+      pointer-events: none;
+      z-index: 999;
+    }
+    .zoom-btn { position: relative; }
+
+    /* Reset hint */
+    .zoom-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- ── Mock Toolbar ────────────────────────────────────────────────────── -->
+  <div class="toolbar">
+    <span class="toolbar-title">OpenAI GPT Response</span>
+    <button class="toolbar-btn">Clear</button>
+    <button class="toolbar-btn">↓ README</button>
+    <button class="toolbar-btn">Detach</button>
+    <button class="toolbar-btn">⛶</button>
+  </div>
+
+  <!-- ── Editor Area ─────────────────────────────────────────────────────── -->
+  <div class="editor-wrap" id="editorWrap">
+    <div class="editor-page" id="editorPage">
+      <h1>CortexHub — Quick Explain</h1>
+      <p>
+        This is a demo of the Microsoft Word–style zoom control. The zoom bar at the
+        bottom lets you scale the view between <code>50%</code> and <code>300%</code>.
+      </p>
+      <h2>How to use</h2>
+      <ul>
+        <li>Click <code>-A</code> to zoom out by 10%.</li>
+        <li>Click <code>A+</code> to zoom in by 10%.</li>
+        <li>Drag the slider for continuous adjustment.</li>
+        <li>Scroll the mouse wheel over the zoom bar.</li>
+        <li>Click the percentage label to reset to <code>100%</code>.</li>
+      </ul>
+      <h2>Keyboard Shortcuts</h2>
+      <p>
+        While hovering the zoom bar, use <code>Ctrl +</code> and <code>Ctrl −</code>
+        to step zoom in or out. Press <code>Ctrl 0</code> to reset.
+      </p>
+      <p>
+        The zoom percentage updates in real time. Minimum zoom is <code>50%</code>,
+        maximum zoom is <code>300%</code>, and the default is <code>100%</code>.
+      </p>
+    </div>
+  </div>
+
+  <!-- ── Word-style Zoom Bar ─────────────────────────────────────────────── -->
+  <div class="zoom-bar" id="zoomBar">
+
+    <button class="zoom-btn" id="btnZoomOut" title="Zoom Out">-A</button>
+    <button class="zoom-btn" id="btnZoomIn"  title="Zoom In">A+</button>
+
+    <div class="zoom-divider"></div>
+
+    <span class="zoom-pct" id="zoomPct" title="Click to reset to 100%">100%</span>
+
+    <div class="zoom-divider"></div>
+
+    <div class="zoom-slider-group">
+      <span class="zoom-bound-label">50%</span>
+      <input
+        type="range"
+        class="zoom-range"
+        id="zoomSlider"
+        min="50"
+        max="300"
+        value="100"
+        step="5"
+        aria-label="Zoom level"
+      />
+      <span class="zoom-bound-label">300%</span>
+    </div>
+
+    <div class="zoom-divider"></div>
+
+    <span class="zoom-hint">Scroll wheel to zoom</span>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════ SCRIPT ═══════════════════════════════════════ -->
+  <script>
+    "use strict";
+
+    const MIN     = 50;
+    const MAX     = 300;
+    const DEFAULT = 100;
+    const STEP    = 10;
+
+    let currentZoom = DEFAULT;
+
+    // Element references
+    const slider    = document.getElementById("zoomSlider");
+    const pctLabel  = document.getElementById("zoomPct");
+    const page      = document.getElementById("editorPage");
+    const zoomBar   = document.getElementById("zoomBar");
+    const btnOut    = document.getElementById("btnZoomOut");
+    const btnIn     = document.getElementById("btnZoomIn");
+
+    /* ── Core zoom setter ──────────────────────────────────────────────── */
+    function setZoom(value) {
+      currentZoom = Math.round(Math.min(MAX, Math.max(MIN, value)));
+
+      // Apply zoom to the page (CSS zoom preserves layout flow like Word)
+      page.style.zoom = currentZoom / 100;
+
+      // Update controls
+      slider.value        = currentZoom;
+      pctLabel.textContent = currentZoom + "%";
+
+      // Update slider track fill: gradient from left to thumb
+      const fillPct = ((currentZoom - MIN) / (MAX - MIN)) * 100;
+      slider.style.background =
+        `linear-gradient(to right, #4a7fcb ${fillPct}%, #252d3e ${fillPct}%)`;
+
+      // Dim buttons at limits
+      btnOut.style.opacity = currentZoom <= MIN ? "0.35" : "1";
+      btnIn.style.opacity  = currentZoom >= MAX ? "0.35" : "1";
+    }
+
+    /* ── Button clicks ─────────────────────────────────────────────────── */
+    btnOut.addEventListener("click", () => setZoom(currentZoom - STEP));
+    btnIn .addEventListener("click", () => setZoom(currentZoom + STEP));
+
+    /* ── Slider input ──────────────────────────────────────────────────── */
+    slider.addEventListener("input", () => setZoom(parseInt(slider.value, 10)));
+
+    /* ── Click percentage label → reset ────────────────────────────────── */
+    pctLabel.addEventListener("click", () => setZoom(DEFAULT));
+
+    /* ── Mouse wheel on zoom bar ───────────────────────────────────────── */
+    zoomBar.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      setZoom(currentZoom + (e.deltaY < 0 ? STEP : -STEP));
+    }, { passive: false });
+
+    /* ── Mouse wheel on editor wrap (Ctrl+Wheel) ──────────────────────── */
+    document.getElementById("editorWrap").addEventListener("wheel", (e) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      setZoom(currentZoom + (e.deltaY < 0 ? STEP : -STEP));
+    }, { passive: false });
+
+    /* ── Keyboard: Ctrl+Plus / Ctrl+Minus / Ctrl+0 ─────────────────────── */
+    document.addEventListener("keydown", (e) => {
+      if (!e.ctrlKey) return;
+      if (e.key === "+" || e.key === "=") { e.preventDefault(); setZoom(currentZoom + STEP); }
+      if (e.key === "-")                  { e.preventDefault(); setZoom(currentZoom - STEP); }
+      if (e.key === "0")                  { e.preventDefault(); setZoom(DEFAULT); }
+    });
+
+    /* ── Initialise ────────────────────────────────────────────────────── */
+    setZoom(DEFAULT);
+  </script>
+
+</body>
+</html>
