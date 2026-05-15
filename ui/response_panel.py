@@ -79,8 +79,8 @@ def _md_to_html(raw: str) -> str:
                 out.append(
                     '<pre style="background:#f6f8fa;border:1px solid #d8dde6;'
                     "border-radius:6px;padding:12px 16px;font-family:Consolas,"
-                    "monospace;font-size:15px;color:#24292e;white-space:pre-wrap;"
-                    f'margin:8px 0"><code>{escaped}</code></pre>'
+                    "monospace;font-size:1em;color:#24292e;white-space:pre-wrap;"
+                    f'margin:8px 0"><code style="font-size:1em">{escaped}</code></pre>'
                 )
             continue
 
@@ -103,20 +103,20 @@ def _md_to_html(raw: str) -> str:
         if stripped.startswith("### "):
             close_lists()
             out.append(
-                '<p style="font-size:13px;font-weight:700;margin:8px 0 2px;color:#1a1a2e">'
+                '<p style="font-size:1.05em;font-weight:700;margin:8px 0 2px;color:#1a1a2e">'
                 + _inline(_html.escape(stripped[4:])) + "</p>"
             )
         elif stripped.startswith("## "):
             close_lists()
             out.append(
-                '<p style="font-size:15px;font-weight:700;margin:10px 0 3px;color:#1a1a2e;'
+                '<p style="font-size:1.2em;font-weight:700;margin:10px 0 3px;color:#1a1a2e;'
                 'border-bottom:1px solid #e8eaed;padding-bottom:3px">'
                 + _inline(_html.escape(stripped[3:])) + "</p>"
             )
         elif stripped.startswith("# "):
             close_lists()
             out.append(
-                '<p style="font-size:17px;font-weight:700;margin:12px 0 4px;color:#1a1a2e">'
+                '<p style="font-size:1.4em;font-weight:700;margin:12px 0 4px;color:#1a1a2e">'
                 + _inline(_html.escape(stripped[2:])) + "</p>"
             )
 
