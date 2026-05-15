@@ -46,7 +46,7 @@ def _inline(text: str) -> str:
     return text
 
 
-def _md_to_html(raw: str) -> str:
+def _md_to_html(raw: str, line_height: float = 1.75) -> str:
     """Convert a full Markdown string to clean HTML for QTextEdit."""
     lines = raw.split("\n")
     out: list[str] = []
@@ -126,7 +126,7 @@ def _md_to_html(raw: str) -> str:
                 out.append('<ul style="margin:4px 0;padding-left:22px;list-style-type:disc">')
                 in_ul = True
             out.append(
-                '<li style="margin:3px 0;line-height:1.75">'
+                f'<li style="margin:3px 0;line-height:{line_height}">'
                 + _inline(_html.escape(stripped[2:])) + "</li>"
             )
 
@@ -137,7 +137,7 @@ def _md_to_html(raw: str) -> str:
                 in_ol = True
             content = re.sub(r"^\d+\.\s+", "", stripped)
             out.append(
-                '<li style="margin:3px 0;line-height:1.75">'
+                f'<li style="margin:3px 0;line-height:{line_height}">'
                 + _inline(_html.escape(content)) + "</li>"
             )
 
@@ -163,7 +163,7 @@ def _md_to_html(raw: str) -> str:
         # ── normal paragraph ────────────────────────────────────────
         else:
             out.append(
-                '<p style="margin:4px 0;line-height:1.75;color:#1a1a2e">'
+                f'<p style="margin:4px 0;line-height:{line_height};color:#1a1a2e">'
                 + _inline(_html.escape(stripped)) + "</p>"
             )
 
@@ -319,6 +319,10 @@ class ResponsePanel(QWidget):
     _MAX_ZOOM_PERCENT = 300
     _DEFAULT_ZOOM_PERCENT = 100
     _ZOOM_STEP = 10
+    _DEFAULT_LINE_HEIGHT = 1.75
+    _MIN_LINE_HEIGHT = 1.0
+    _MAX_LINE_HEIGHT = 3.0
+    _LINE_STEP = 0.1
 
     def __init__(
         self,
@@ -329,6 +333,7 @@ class ResponsePanel(QWidget):
         super().__init__(parent)
         self._zoom_percent = self._DEFAULT_ZOOM_PERCENT
         self._font_size = self._BASE_FONT_SIZE
+        self._line_height = self._DEFAULT_LINE_HEIGHT
         self._title_text = title
         self._raw_buffer: list[str] = []
 
@@ -471,7 +476,7 @@ class ResponsePanel(QWidget):
         raw = "".join(self._raw_buffer)
         if not raw.strip():
             return
-        body = _md_to_html(raw)
+        body = _md_to_html(raw, self._line_height)
         full_html = self._build_html(body)
         sb = self._view.verticalScrollBar()
         at_bottom = sb.value() >= sb.maximum() - 40
@@ -485,7 +490,7 @@ class ResponsePanel(QWidget):
         raw = "".join(self._raw_buffer)
         if not raw.strip():
             return
-        body = _md_to_html(raw)
+        body = _md_to_html(raw, self._line_height)
         self._view.setHtml(self._build_html(body))
         cursor = self._view.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.Start)
@@ -493,8 +498,8 @@ class ResponsePanel(QWidget):
 
     def _build_html(self, body: str) -> str:
         return (
-            '<div style="font-family:\'Segoe UI\',Arial,sans-serif;'
-            f'font-size:{self._font_size}px;line-height:1.75;color:#1a1a2e;padding:4px">'
+            f'<div style="font-family:\'Segoe UI\',Arial,sans-serif;'
+            f'font-size:{self._font_size}px;line-height:{self._line_height};color:#1a1a2e;padding:4px">'
             + body + "</div>"
         )
 
@@ -629,6 +634,33 @@ class ResponsePanel(QWidget):
 
     def _zoom_reset(self) -> None:
         self._set_zoom_percent(self._DEFAULT_ZOOM_PERCENT)
+
+    # Public wrappers for external callers
+    def zoom_in(self) -> None:
+        self._zoom_in()
+
+    def zoom_out(self) -> None:
+        self._zoom_out()
+
+    def increase_line_spacing(self, step: float | None = None) -> None:
+        """Increase the paragraph/list line-height and re-render."""
+        if step is None:
+            step = self._LINE_STEP
+        new = min(self._MAX_LINE_HEIGHT, self._line_height + step)
+        if new == self._line_height:
+            return
+        self._line_height = new
+        self._do_render_update()
+
+    def decrease_line_spacing(self, step: float | None = None) -> None:
+        """Decrease the paragraph/list line-height and re-render."""
+        if step is None:
+            step = self._LINE_STEP
+        new = max(self._MIN_LINE_HEIGHT, self._line_height - step)
+        if new == self._line_height:
+            return
+        self._line_height = new
+        self._do_render_update()
 
     # ---------------------------------------------------------- Ctrl+scroll zoom
     def eventFilter(self, obj, event) -> bool:  # noqa: N802

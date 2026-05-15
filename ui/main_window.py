@@ -5,7 +5,7 @@ import base64
 import logging
 import os
 
-from PySide6.QtCore import QBuffer, Qt, QPoint, QThread, Signal
+from PySide6.QtCore import QBuffer, Qt, QPoint, QThread, Signal, QTimer
 from PySide6.QtGui import QImage, QKeySequence, QPixmap, QShortcut, QTextCursor
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QVBoxLayout,
     QWidget,
+    QApplication,
+    QLineEdit,
 )
 
 log = logging.getLogger(__name__)
@@ -365,6 +367,96 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+M"), self, activated=self._toggle_voice_input)
         QShortcut(QKeySequence("F1"), self, activated=self._show_shortcuts_panel)
 
+        # Zoom shortcuts (Ctrl + + / Ctrl + -)
+        # Register both Ctrl++ and the common Ctrl+= mapping for keyboards where + is Shift+=
+        QShortcut(QKeySequence("Ctrl++"), self, activated=self._zoom_in_all)
+        QShortcut(QKeySequence("Ctrl+="), self, activated=self._zoom_in_all)
+        QShortcut(QKeySequence("Ctrl+-"), self, activated=self._zoom_out_all)
+
+        # Line-spacing prefix mode: press `L` then `+` or `-` within 1.5s
+        self._line_prefix_active = False
+        self._line_prefix_timer = QTimer(self)
+        self._line_prefix_timer.setSingleShot(True)
+        self._line_prefix_timer.setInterval(1500)
+        self._line_prefix_timer.timeout.connect(self._clear_line_prefix)
+
+        sc_L = QShortcut(QKeySequence("L"), self)
+        sc_L.setContext(Qt.ApplicationShortcut)
+        sc_L.activated.connect(self._activate_line_prefix)
+
+        sc_plus = QShortcut(QKeySequence(Qt.Key_Plus), self)
+        sc_plus.setContext(Qt.ApplicationShortcut)
+        sc_plus.activated.connect(lambda: self._handle_prefix_plus_minus(True))
+
+        sc_minus = QShortcut(QKeySequence(Qt.Key_Minus), self)
+        sc_minus.setContext(Qt.ApplicationShortcut)
+        sc_minus.activated.connect(lambda: self._handle_prefix_plus_minus(False))
+
+    # ---------------------------------------------------------------- custom shortcuts handlers
+    def _zoom_in_all(self) -> None:
+        """Zoom in both response panels."""
+        for p in (getattr(self, "_openai_panel", None), getattr(self, "_claude_panel", None)):
+            if p is None:
+                continue
+            try:
+                if hasattr(p, "zoom_in"):
+                    p.zoom_in()
+                else:
+                    p._zoom_in()
+            except Exception:
+                pass
+
+    def _zoom_out_all(self) -> None:
+        """Zoom out both response panels."""
+        for p in (getattr(self, "_openai_panel", None), getattr(self, "_claude_panel", None)):
+            if p is None:
+                continue
+            try:
+                if hasattr(p, "zoom_out"):
+                    p.zoom_out()
+                else:
+                    p._zoom_out()
+            except Exception:
+                pass
+
+    def _activate_line_prefix(self) -> None:
+        """Activate the `L` prefix for a short window to accept + or - for line spacing.
+
+        Ignore when focus is inside text-editing widgets so typing isn't interrupted.
+        """
+        fw = QApplication.focusWidget()
+        if isinstance(fw, (QTextEdit, QLineEdit)):
+            return
+        self._line_prefix_active = True
+        self._line_prefix_timer.start()
+        try:
+            self._status.setText("● Line spacing: waiting for + or -")
+        except Exception:
+            pass
+
+    def _clear_line_prefix(self) -> None:
+        self._line_prefix_active = False
+        try:
+            self._status.setText("● Ready")
+        except Exception:
+            pass
+
+    def _handle_prefix_plus_minus(self, plus: bool) -> None:
+        """Handle + or - pressed while L-prefix is active: adjust line spacing."""
+        if not getattr(self, "_line_prefix_active", False):
+            return
+        for p in (getattr(self, "_openai_panel", None), getattr(self, "_claude_panel", None)):
+            if p is None:
+                continue
+            try:
+                if plus:
+                    p.increase_line_spacing()
+                else:
+                    p.decrease_line_spacing()
+            except Exception:
+                pass
+        self._clear_line_prefix()
+
     # ----------------------------------------------------------------- shortcuts panel
     def _show_shortcuts_panel(self) -> None:
         """Toggle the floating keyboard shortcuts reference panel."""
@@ -426,6 +518,8 @@ class MainWindow(QMainWindow):
             ]),
             ("Panels & View", [
                 ("Ctrl+Scroll", "Zoom response text"),
+                ("Ctrl++ / Ctrl+-", "Zoom response text"),
+                ("L + / L -", "Adjust line spacing"),
                 ("Esc",         "Close popups / dismiss"),
             ]),
         ]
