@@ -53,24 +53,24 @@ class AIWorker(QThread):
         self.wait()
 
     # ------------------------------------------------------------------ submit
-    def submit(self, prompt: str) -> None:
-        """Schedule a new prompt to be streamed to both models."""
+    def submit(self, prompt: str, images: list[tuple[str, str]] | None = None) -> None:
+        """Schedule a new prompt (with optional images) to be streamed to both models."""
         self._ready.wait()
         assert self._loop is not None
-        asyncio.run_coroutine_threadsafe(self._handle(prompt), self._loop)
+        asyncio.run_coroutine_threadsafe(self._handle(prompt, images or []), self._loop)
 
     # ---------------------------------------------------------------- internal
-    async def _handle(self, prompt: str) -> None:
+    async def _handle(self, prompt: str, images: list[tuple[str, str]]) -> None:
         await asyncio.gather(
-            self._stream_one(MODEL_OPENAI, prompt),
-            self._stream_one(MODEL_CLAUDE, prompt),
+            self._stream_one(MODEL_OPENAI, prompt, images),
+            self._stream_one(MODEL_CLAUDE, prompt, images),
         )
         self.all_done.emit()
 
-    async def _stream_one(self, model_name: str, prompt: str) -> None:
+    async def _stream_one(self, model_name: str, prompt: str, images: list[tuple[str, str]]) -> None:
         collected: list[str] = []
         try:
-            async for chunk in self._ai_manager.stream(model_name, prompt):
+            async for chunk in self._ai_manager.stream(model_name, prompt, images):
                 collected.append(chunk)
                 self.chunk_received.emit(model_name, chunk)
             self._ai_manager.commit_assistant(model_name, "".join(collected))

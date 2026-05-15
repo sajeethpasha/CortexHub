@@ -46,17 +46,35 @@ class OpenAIClient:
 
     async def stream(
         self,
-        history: list[dict[str, str]],
+        history: list[dict],
         system_prompt: str | None = None,
+        images: list[tuple[str, str]] | None = None,
     ) -> AsyncIterator[str]:
         """Stream the assistant's reply to ``history`` as text chunks.
 
         *system_prompt* overrides the default README-style prompt when
         provided (e.g. interview mode). Falls back to the built-in prompt.
+        *images* is a list of (media_type, base64_data) tuples attached to
+        the current turn.
         """
-        messages: list[dict[str, str]] = [
+        # Build messages, converting the last user message to vision format if images provided
+        base_history: list[dict] = list(history)
+        if images:
+            for i in range(len(base_history) - 1, -1, -1):
+                if base_history[i]["role"] == "user":
+                    text = base_history[i]["content"]
+                    content: list[dict] = [{"type": "text", "text": text}]
+                    for media_type, b64_data in images:
+                        content.append({
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{media_type};base64,{b64_data}"},
+                        })
+                    base_history[i] = {"role": "user", "content": content}
+                    break
+
+        messages: list[dict] = [
             {"role": "system", "content": system_prompt or _README_SYSTEM_PROMPT},
-            *history,
+            *base_history,
         ]
         stream = await self._client.chat.completions.create(
             model=self.model,

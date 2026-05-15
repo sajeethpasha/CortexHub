@@ -68,6 +68,33 @@ QWidget#PromptContainer {
     border-radius: 0;
 }
 
+/* ── Image strip ─────────────────────────────────────────────── */
+QScrollArea#ImageStrip {
+    background: #0d1018;
+    border: 1px solid #1e2636;
+    border-radius: 6px;
+}
+QWidget#ImageStripInner {
+    background: transparent;
+}
+QFrame#ImageThumbFrame {
+    background: #141820;
+    border: 1px solid #252d3e;
+    border-radius: 6px;
+}
+QPushButton#ImageDeleteBtn {
+    background: #3a1a1a;
+    color: #e05252;
+    border: 1px solid #6a2a2a;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 0px;
+}
+QPushButton#ImageDeleteBtn:hover {
+    background: #5a1a1a;
+}
+
 QTextEdit#PromptInput {
     background-color: #0d1018;
     border: 1.5px solid #273045;

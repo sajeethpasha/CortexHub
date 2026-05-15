@@ -1,19 +1,45 @@
 """CORTEXHUB main window."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QPoint, QThread, Signal
-from PySide6.QtGui import QKeySequence, QShortcut, QTextCursor
+import base64
+import logging
+import os
+
+from PySide6.QtCore import QBuffer, Qt, QPoint, QThread, Signal
+from PySide6.QtGui import QImage, QKeySequence, QPixmap, QShortcut, QTextCursor
 from PySide6.QtWidgets import (
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
+
+log = logging.getLogger(__name__)
+
+
+class _PromptTextEdit(QTextEdit):
+    """QTextEdit that intercepts clipboard-pasted images and emits a signal."""
+
+    image_pasted = Signal(str, str)  # media_type, base64_data
+
+    def insertFromMimeData(self, source) -> None:  # noqa: N802
+        if source.hasImage():
+            qimage: QImage = source.imageData()
+            buf = QBuffer()
+            buf.open(QBuffer.OpenModeFlag.ReadWrite)
+            qimage.save(buf, "PNG")
+            b64 = base64.b64encode(bytes(buf.data())).decode()
+            buf.close()
+            self.image_pasted.emit("image/png", b64)
+            return
+        super().insertFromMimeData(source)
 
 
 class _ResponseSplitter(QSplitter):
@@ -146,6 +172,7 @@ class MainWindow(QMainWindow):
         self._voice_worker.partial_text.connect(self._on_voice_partial)
         self._voice_worker.status_changed.connect(self._on_voice_status)
         self._voice_partial_anchor = -1
+        self._pending_images: list[dict] = []  # {"media_type", "data", "widget"}
         self._build_ui()
 
     # ---------------------------------------------------------------- ui setup
@@ -217,12 +244,13 @@ class MainWindow(QMainWindow):
         top_layout.addWidget(self._fullscreen_btn)
 
         # ---- prompt input ------------------------------------------------
-        self._prompt = QTextEdit()
+        self._prompt = _PromptTextEdit()
         self._prompt.setObjectName("PromptInput")
         self._prompt.setPlaceholderText(
-            "Ask anything…   (Ctrl+Enter to send)"
+            "Ask anything…   (Ctrl+Enter to send  |  📎 paste or attach images)"
         )
         self._prompt.setFixedHeight(116)
+        self._prompt.image_pasted.connect(self._add_image)
 
         prompt_hdr = QWidget()
         prompt_hdr.setObjectName("PanelTitleBar")
@@ -262,12 +290,39 @@ class MainWindow(QMainWindow):
         self._mic_btn.clicked.connect(self._toggle_voice_input)
         ph_layout.addWidget(self._mic_btn)
 
+        self._attach_btn = QPushButton("📎")
+        self._attach_btn.setObjectName("PanelToolButton")
+        self._attach_btn.setToolTip(
+            "Attach images (PNG, JPG, GIF, WEBP) — you can also paste images with Ctrl+V"
+        )
+        self._attach_btn.setFixedSize(34, 26)
+        self._attach_btn.clicked.connect(self._on_attach_image)
+        ph_layout.addWidget(self._attach_btn)
+
+        # ---- image preview strip (hidden when empty) --------------------
+        self._image_strip_inner = QWidget()
+        self._image_strip_inner.setObjectName("ImageStripInner")
+        self._image_strip_layout = QHBoxLayout(self._image_strip_inner)
+        self._image_strip_layout.setContentsMargins(6, 4, 6, 4)
+        self._image_strip_layout.setSpacing(6)
+        self._image_strip_layout.addStretch(1)
+
+        self._image_strip = QScrollArea()
+        self._image_strip.setObjectName("ImageStrip")
+        self._image_strip.setWidget(self._image_strip_inner)
+        self._image_strip.setWidgetResizable(True)
+        self._image_strip.setFixedHeight(88)
+        self._image_strip.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._image_strip.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._image_strip.setVisible(False)
+
         self._prompt_container = QWidget()
         self._prompt_container.setObjectName("PromptContainer")
         prompt_inner = QVBoxLayout(self._prompt_container)
         prompt_inner.setContentsMargins(0, 0, 0, 0)
         prompt_inner.setSpacing(0)
         prompt_inner.addWidget(prompt_hdr)
+        prompt_inner.addWidget(self._image_strip)
         prompt_inner.addWidget(self._prompt)
 
         # ---- response panels in a horizontal splitter --------------------
@@ -412,7 +467,8 @@ class MainWindow(QMainWindow):
     # ----------------------------------------------------------------- actions
     def _on_send_clicked(self) -> None:
         prompt = self._prompt.toPlainText().strip()
-        if not prompt or self._busy_models:
+        images = [(e["media_type"], e["data"]) for e in self._pending_images]
+        if (not prompt and not images) or self._busy_models:
             return
 
         # Clear visible panels for the new question (history is kept in DB).
@@ -424,7 +480,8 @@ class MainWindow(QMainWindow):
 
         self._status.setText("● Streaming…")
 
-        self._worker.submit(prompt)
+        self._worker.submit(prompt, images)
+        self._clear_images()
         # Keep the question visible — do not clear the prompt
 
     def _on_clear_clicked(self) -> None:
@@ -434,12 +491,114 @@ class MainWindow(QMainWindow):
     def _clear_prompt(self) -> None:
         """Clear prompt AND both response panels, unlock for new input."""
         self._prompt.clear()
+        self._clear_images()
         self._caption_partial_anchor = -1
         self._openai_panel.clear()
         self._claude_panel.clear()
         self._send_btn.setEnabled(True)
         self._status.setText("● Ready")
 
+
+    def _on_attach_image(self) -> None:
+        """Open file dialog and add selected images to the pending list."""
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Attach Images", "",
+            "Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp)"
+        )
+        for path in paths:
+            result = self._load_image_from_path(path)
+            if result:
+                self._add_image(*result)
+
+    def _load_image_from_path(self, path: str) -> tuple[str, str] | None:
+        """Load any image file, normalise to PNG, return (media_type, base64)."""
+        qimage = QImage(path)
+        if qimage.isNull():
+            log.warning("Could not load image: %s", path)
+            return None
+        # Resize if larger than 1568px (Claude/OpenAI recommendation)
+        if qimage.width() > 1568 or qimage.height() > 1568:
+            qimage = qimage.scaled(
+                1568, 1568,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        buf = QBuffer()
+        buf.open(QBuffer.OpenModeFlag.ReadWrite)
+        qimage.save(buf, "PNG")
+        b64 = base64.b64encode(bytes(buf.data())).decode()
+        buf.close()
+        return "image/png", b64
+
+    def _add_image(self, media_type: str, b64_data: str) -> None:
+        """Add an image to the pending list and render its thumbnail in the strip."""
+        # Build thumbnail pixmap
+        img_bytes = base64.b64decode(b64_data)
+        pixmap = QPixmap()
+        pixmap.loadFromData(img_bytes)
+        thumb = pixmap.scaled(
+            64, 64,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+
+        # Build thumbnail cell
+        cell = QFrame()
+        cell.setObjectName("ImageThumbFrame")
+        cell.setFixedSize(76, 76)
+
+        thumb_lbl = QLabel()
+        thumb_lbl.setPixmap(thumb)
+        thumb_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        thumb_lbl.setObjectName("ImageThumbLabel")
+
+        del_btn = QPushButton("✕")
+        del_btn.setObjectName("ImageDeleteBtn")
+        del_btn.setFixedSize(18, 18)
+
+        cell_layout = QVBoxLayout(cell)
+        cell_layout.setContentsMargins(3, 3, 3, 3)
+        cell_layout.setSpacing(2)
+        cell_layout.addWidget(thumb_lbl, 1, Qt.AlignmentFlag.AlignCenter)
+        cell_layout.addWidget(del_btn, 0, Qt.AlignmentFlag.AlignRight)
+
+        entry: dict = {"media_type": media_type, "data": b64_data, "widget": cell}
+        del_btn.clicked.connect(lambda _checked, e=entry: self._remove_image(e))
+
+        # Insert before the trailing stretch (last item)
+        insert_pos = self._image_strip_layout.count() - 1
+        self._image_strip_layout.insertWidget(insert_pos, cell)
+
+        self._pending_images.append(entry)
+        self._image_strip.setVisible(True)
+        self._update_attach_btn_label()
+
+    def _remove_image(self, entry: dict) -> None:
+        """Remove one image thumbnail and its data entry."""
+        if entry in self._pending_images:
+            self._pending_images.remove(entry)
+        widget = entry.get("widget")
+        if widget:
+            self._image_strip_layout.removeWidget(widget)
+            widget.deleteLater()
+        if not self._pending_images:
+            self._image_strip.setVisible(False)
+        self._update_attach_btn_label()
+
+    def _clear_images(self) -> None:
+        """Remove all pending images and hide the strip."""
+        for entry in list(self._pending_images):
+            widget = entry.get("widget")
+            if widget:
+                self._image_strip_layout.removeWidget(widget)
+                widget.deleteLater()
+        self._pending_images.clear()
+        self._image_strip.setVisible(False)
+        self._update_attach_btn_label()
+
+    def _update_attach_btn_label(self) -> None:
+        n = len(self._pending_images)
+        self._attach_btn.setText(f"📎 {n}" if n else "📎")
 
     def _toggle_fullscreen(self) -> None:
         if self.isFullScreen():

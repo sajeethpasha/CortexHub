@@ -24,22 +24,43 @@ class ClaudeClient:
 
     async def stream(
         self,
-        history: list[dict[str, str]],
+        history: list[dict],
         system_prompt: str | None = None,
+        images: list[tuple[str, str]] | None = None,
     ) -> AsyncIterator[str]:
         """Stream the assistant's reply for ``history`` as text chunks.
 
         *system_prompt* is passed via the top-level Anthropic ``system``
         parameter (not inside messages). Falls back to empty when omitted.
+        *images* is a list of (media_type, base64_data) tuples attached to
+        the current turn.
         """
+        messages: list[dict] = list(history)
+        if images:
+            for i in range(len(messages) - 1, -1, -1):
+                if messages[i]["role"] == "user":
+                    text = messages[i]["content"]
+                    content: list[dict] = []
+                    for media_type, b64_data in images:
+                        content.append({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": b64_data,
+                            },
+                        })
+                    content.append({"type": "text", "text": text})
+                    messages[i] = {"role": "user", "content": content}
+                    break
+
         kwargs: dict = {
             "model": self.model,
             "max_tokens": 2048,
-            "messages": history,
+            "messages": messages,
         }
         if system_prompt:
             kwargs["system"] = system_prompt
-        # Anthropic requires a non-zero max_tokens
         async with self._client.messages.stream(**kwargs) as stream:
             async for text in stream.text_stream:
                 if text:

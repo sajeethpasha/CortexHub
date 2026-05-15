@@ -4,14 +4,14 @@ from __future__ import annotations
 import sys
 
 from dotenv import load_dotenv
+load_dotenv()
 from PySide6.QtWidgets import QApplication
 
 from ui.main_window import MainWindow
 
 
 def main() -> int:
-    # Load API keys from .env (if present) before any client is constructed.
-    load_dotenv()
+    # .env already loaded at module import time.
 
     app = QApplication(sys.argv)
     app.setApplicationName("CORTEXHUB")

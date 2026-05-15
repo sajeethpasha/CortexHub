@@ -91,7 +91,7 @@ class AIManager:
         raise ValueError(f"Unknown model: {model_name}")
 
     # ------------------------------------------------------------------ stream
-    async def stream(self, model_name: str, prompt: str) -> AsyncIterator[str]:
+    async def stream(self, model_name: str, prompt: str, images: list[tuple[str, str]] | None = None) -> AsyncIterator[str]:
         """Append the user prompt to that model's history and stream the reply.
 
         The assistant's full reply is NOT saved here; call ``commit_assistant``
@@ -107,7 +107,7 @@ class AIManager:
         if rag_context:
             system_prompt = f"{system_prompt}\n\n{rag_context}"
 
-        async for chunk in client.stream(history, system_prompt=system_prompt):
+        async for chunk in client.stream(history, system_prompt=system_prompt, images=images or []):
             yield chunk
 
     def commit_assistant(self, model_name: str, content: str) -> None:
